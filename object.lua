@@ -472,6 +472,15 @@ local function newObject(object)
             return callbacks[n](object, ...) ~= false and objectCallbacks[n](object, internal, ...)
         end
     end
+    wrappers.draw = function(...)
+        if love and love.graphics then
+            love.graphics.push("all") love.graphics.push("all")
+        end
+        if callbacks.draw(object, ...) == false then return false end
+        if love and love.graphics then love.graphics.pop() end
+        objectCallbacks.draw(object, internal, ...)
+        if love and love.graphics then love.graphics.pop() end
+    end
     for k, f in pairs(objectFunctions) do
         methods[k] = function(...)
             return f(object, internal, ...)
