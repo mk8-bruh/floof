@@ -72,7 +72,7 @@ local objectCallbacks = {
         local t = self.children
         for i, e in ipairs(t) do
             if e.check(x, y) and e.pressed(x, y, id) ~= false then
-                self.addPress(e, id)
+                self.setPressTarget(id, e)
                 return true
             end
         end
@@ -81,7 +81,7 @@ local objectCallbacks = {
         if self.pressedObject[id] then
             if self.pressedObject[id].moved(x, y, dx, dy, id) ~= true and not self.pressedObject[id].check(x, y) then
                 self.pressedObject[id].cancelled(id)
-                self.removePress(id)
+                self.setPressTarget(id)
             end
             return true
         end
@@ -89,7 +89,7 @@ local objectCallbacks = {
     released = function(self, internal, x, y, id)
         if self.pressedObject[id] then
             self.pressedObject[id].released(x, y, id)
-            self.removePress(id)
+            self.setPressTarget(id)
             return true
         end
     end,
@@ -144,39 +144,31 @@ local objectFunctions = {
         end
         return false
     end,
-    addPress = function(self, internal, object, id)
-        if not isObject(object) then
-            error(("Invalid object (got: %s (%s))"):format(tostring(object), type(object)), 3)
-        end
-        if object.parent ~= self then
-            error(("Target must be a child of this object"), 3)
-        end
+    setPressTarget = function(self, internal, id, object)
         if not getPressPosition(id) then
             error(("Invalid press ID: %s (%s)"):format(tostring(id), type(id)), 3)
+        end
+        if object ~= null and not isObject(object) then
+            error(("Invalid object (got: %s (%s))"):format(tostring(object), type(object)), 3)
+        end
+        if object ~= null and object.parent ~= self then
+            error(("Target must be a child of this object"), 3)
         end
         if object == root then return end
         if internal.pressedObject[id] == object then return end
         if internal.pressedObject[id] then
-            internal.pressedObject[id].cancelled(id)
-            self.removePress(id)
-        end
-        table.insert(internal.objectPresses[object], id)
-        internal.pressedObject[id] = object
-    end,
-    removePress = function(self, internal, id)
-        if not getPressPosition(id) then
-            error(("Invalid press ID: %s (%s)"):format(tostring(id), type(id)), 3)
-        end
-        if not internal.pressedObject[id] then return end
-        local object = internal.pressedObject[id]
-        for i, o in ipairs(internal.objectPresses[object]) do
-            if o == id then
-                table.remove(internal.objectPresses[object], i)
-                break
+            for i, o in ipairs(internal.objectPresses[object]) do
+                if o == id then
+                    table.remove(internal.objectPresses[object], i)
+                    break
+                end
             end
+            object.setPressTarget(id)
         end
-        object.removePress(id)
-        internal.pressedObject[id] = nil
+        if object then
+            table.insert(internal.objectPresses[object], id)
+        end
+        internal.pressedObject[id] = object
     end
 }
 
@@ -407,21 +399,15 @@ local objectProperties = {
             internal.pressedObjectProxy = setmetatable({}, {
                 __index = internal.pressedObject, __newindex = function(t, k, v)
                     if not getPressPosition(k) then
-                        error(("Invalid press ID: %s (%s)"):format(tostring(k), type(k)), 2)
+                        error(("Invalid press ID: %s (%s)"):format(tostring(k), type(k)), 3)
                     end
-                    if not isObject(v) and v ~= nil then
-                        error(("Press target must be an object or nil (got: %s (%s))"):format(tostring(v), type(v)), 2)
+                    if v ~= null and not isObject(v) then
+                        error(("Invalid object (got: %s (%s))"):format(tostring(v), type(v)), 3)
                     end
-                    if v == root then return end
-                    local o = internal.pressedObject[k]
-                    internal.pressedObject[k] = v
-                    if o then
-                        self.removePress(k)
+                    if v ~= nil and v.parent ~= self then
+                        error(("Target must be a child of this object"), 3)
                     end
-                    if v then
-                        local x, y = getPressPosition(k)
-                        v.pressed(x, y, k)
-                    end
+                    self.setPressTarget(k, v)
                 end
             })
         end,
