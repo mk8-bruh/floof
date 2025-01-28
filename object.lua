@@ -468,18 +468,17 @@ local function newObject(object)
     local check = nil
     for i, n in ipairs(callbackNames) do
         callbacks[n] = type(object[n]) == "function" and object[n] or emptyf
-        wrappers[n] = function(...)
+        wrappers[n] = n == "draw" and function(...)
+            if love and love.graphics then
+                love.graphics.push("all") love.graphics.push("all")
+            end
+            if callbacks[n](object, ...) == false then return false end
+            if love and love.graphics then love.graphics.pop() end
+            objectCallbacks[n](object, internal, ...)
+            if love and love.graphics then love.graphics.pop() end
+        end or function(...)
             return callbacks[n](object, ...) ~= false and objectCallbacks[n](object, internal, ...)
         end
-    end
-    wrappers.draw = function(...)
-        if love and love.graphics then
-            love.graphics.push("all") love.graphics.push("all")
-        end
-        if callbacks.draw(object, ...) == false then return false end
-        if love and love.graphics then love.graphics.pop() end
-        objectCallbacks.draw(object, internal, ...)
-        if love and love.graphics then love.graphics.pop() end
     end
     for k, f in pairs(objectFunctions) do
         methods[k] = function(...)
