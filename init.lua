@@ -1,4 +1,4 @@
-local _NAME = ...
+local _PATH = (...):match("(.-)[^%.]+$")
 
 local loveCallbackNames, blockingCallbackNames = {
     "resize", "update", "draw", "quit",
@@ -21,7 +21,7 @@ local loveCallbackNames, blockingCallbackNames = {
 
 local emptyf, identityf = function(...) return end, function(...) return ... end
 
-local object = require(_NAME .. ".object")
+local object = require(_PATH .. ".object")
 
 local mouseButtons = {}
 
