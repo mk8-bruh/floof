@@ -1,4 +1,4 @@
-local _PATH = (...):match("(.-)[^%.]+$")
+local _PATH = ...
 
 local loveCallbackNames, blockingCallbackNames = {
     "resize", "update", "draw", "quit",
