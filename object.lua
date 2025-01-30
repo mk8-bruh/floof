@@ -232,16 +232,16 @@ local objectFunctions = {
             error(("Invalid object (got: %s (%s))"):format(tostring(object), type(object)), 3)
         end
         if object.parent == self then
-            internal.childRegister[k] = true
-            internal.objectPresses[k] = internal.objectPresses[k] or newArray()
+            internal.childRegister[object] = true
+            internal.objectPresses[object] = internal.objectPresses[k] or newArray()
         else
-            internal.childRegister[k] = nil
-            for i, id in ipairs(internal.objectPresses[k]) do
+            internal.childRegister[object] = nil
+            for i, id in ipairs(internal.objectPresses[object]) do
                 internal.pressedObject[id] = nil
             end
-            internal.objectPresses[k] = nil
+            internal.objectPresses[object] = nil
         end
-    end
+    end,
     -- traverse the hierarchy upwards and check for object
     isChildOf = function(self, internal, object)
         if not isObject(object) then
@@ -326,6 +326,14 @@ local objectProperties = {
             if value.isChildOf(self) then
                 error(("Cannot assign object as the parent of its current parent"), 3)
             end
+            -- deactivate in all parent objects
+            local e = self
+            while e ~= root do
+                e = e.parent
+                if e.activeChild == self then
+                    e.activeChild = nil
+                end
+            end
             local p = self.parent
             internal.parent = value
             p.updateChildStatus(self)
@@ -397,7 +405,6 @@ local objectProperties = {
     -- the currently active child of this object (dosn't have to be a direct child)
     activeChild = {
         get = function(self, internal)
-            if not internal.active.isChildOf(self) then internal.active = nil end
             return internal.active
         end,
         set = function(self, internal, value)
