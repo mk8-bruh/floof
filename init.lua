@@ -39,64 +39,62 @@ local lib = {
     new = object.new, newObject = object.new,
     root = object.root,
     init = function()
+        if not love then return end
         local root = object.root
-        if love then
-            local old = {}
-            for _, f in ipairs(loveCallbackNames) do
-                old[f] = love[f] or emptyf
+        local old = {}
+        for _, f in ipairs(loveCallbackNames) do
+            old[f] = love[f] or emptyf
+        end
+        for _, f in ipairs(blockingCallbackNames) do
+            love[f] = function(...)
+                return root[f](...) or old[f](...)
             end
-            for _, f in ipairs(blockingCallbackNames) do
-                love[f] = function(...)
-                    return root[f](...) or old[f](...)
+        end
+        for _, f in ipairs{"resize", "update", "draw", "quit"} do
+            love[f] = function(...)
+                old[f](...)
+                root[f](...)
+            end
+        end
+        love.mousepressed = function(...)
+            local x, y, b, t = ...
+            if b and not t then
+                mouseButtons[b] = true
+                return root.pressed(x, y, b) or old.mousepressed(...)
+            end
+        end
+        love.mousemoved = function(...)
+            local x, y, dx, dy, t = ...
+            if not t then
+                local r = false
+                for b in pairs(mouseButtons) do
+                    r = r or root.moved(x, y, dx, dy, b)
                 end
+                return r or old.mousemoved(...)
             end
-            for _, f in ipairs{"resize", "update", "draw", "quit"} do
-                love[f] = function(...)
-                    old[f](...)
-                    root[f](...)
-                end
+        end
+        love.mousereleased = function(...)
+            local x, y, b, t = ...
+            if b and not t then
+                mouseButtons[b] = nil
+                return root.released(x, y, b) or old.mousereleased(...)
             end
-            love.mousepressed = function(...)
-                local x, y, b, t = ...
-                if b and not t then
-                    mouseButtons[b] = true
-                    return root.pressed(x, y, b) or old.mousepressed(...)
-                end
-            end
-            love.mousemoved = function(...)
-                local x, y, dx, dy, t = ...
-                if not t then
-                    local r = false
-                    for b in pairs(mouseButtons) do
-                        r = r or root.moved(x, y, dx, dy, b)
-                    end
-                    return r or old.mousemoved(...)
-                end
-            end
-            love.mousereleased = function(...)
-                local x, y, b, t = ...
-                if b and not t then
-                    mouseButtons[b] = nil
-                    return root.released(x, y, b) or old.mousereleased(...)
-                end
-            end
-            love.wheelmoved = function(...)
-                local x, y = ...
-                return root.scrolled(y) or old.wheelmoved(...)
-            end
-            love.touchpressed = function(...)
-                local id, x, y = ...
-                return root.pressed(x, y, id) or old.touchpressed(...)
-            end
-            love.touchmoved = function(...)
-                local id, x, y, dx, dy = ...
-                return root.moved(x, y, dx, dy, id) or old.touchmoved(...)
-            end
-            love.touchreleased = function(...)
-                local id, x, y = ...
-                return root.released(x, y, id) or old.touchreleased(...)
-            end
-            root.resize(love.graphics.getDimensions())
+        end
+        love.wheelmoved = function(...)
+            local x, y = ...
+            return root.scrolled(y) or old.wheelmoved(...)
+        end
+        love.touchpressed = function(...)
+            local id, x, y = ...
+            return root.pressed(x, y, id) or old.touchpressed(...)
+        end
+        love.touchmoved = function(...)
+            local id, x, y, dx, dy = ...
+            return root.moved(x, y, dx, dy, id) or old.touchmoved(...)
+        end
+        love.touchreleased = function(...)
+            local id, x, y = ...
+            return root.released(x, y, id) or old.touchreleased(...)
         end
     end
 }

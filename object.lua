@@ -302,9 +302,9 @@ local objectProperties = {
         init = function(self, internal)
             if self ~= root then
                 internal.parent = root
-                internal.parent.updateChildStatus(self)
-                internal.parent.added(self)
-                self.addedto(internal.parent)
+                root.updateChildStatus(self)
+                root.added(self)
+                self.addedto(root)
             end
         end,
         get = function(self, internal)
@@ -383,7 +383,7 @@ local objectProperties = {
         end,
         get = function(self, internal)
             if self == root then return internal.enabled end
-            return self.parent.isEnabled and internal.enabled
+            return internal.enabled and internal.parent.isEnabled
         end,
         set = function(self, internal, value)
             if type(value) ~= "boolean" then
