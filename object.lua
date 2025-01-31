@@ -412,7 +412,7 @@ local objectProperties = {
             if not isObject(value) and value ~= nil then
                 error(("Active child must be an object (got: %s (%s))"):format(tostring(value), type(value)), 3)
             end
-            if not value.isChildOf(self) then
+            if value ~= nil and not value.isChildOf(self) then
                 error(("Active child must be a child of the object"), 3)
             end
             if value == root then
