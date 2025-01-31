@@ -303,8 +303,6 @@ local objectProperties = {
             if self ~= root then
                 internal.parent = root
                 root.updateChildStatus(self)
-                root.added(self)
-                self.addedto(root)
             end
         end,
         get = function(self, internal)
@@ -674,6 +672,10 @@ local function newObject(object)
     if love and love.graphics then
         object.resize(love.graphics.getDimensions())
     end
+    -- initial parent calls
+    root.added(object)
+    object.addedto(root)
+    
     return object
 end
 
