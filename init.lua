@@ -103,5 +103,5 @@ return setmetatable({}, {
 	__index = lib,
 	__newindex = emptyf,
 	__metatable = {},
-	__tostring = function() return 'hawk-tUI code on that thang :3' end
+	__tostring = function() return 'FLUFFI :3' end
 })
