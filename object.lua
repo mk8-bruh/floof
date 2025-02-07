@@ -250,21 +250,12 @@ local objectFunctions = {
         local e = self
         while e ~= root do
             e = e.parent
+            if not e then break end
             if e == object then
                 return true
             end
         end
         return false
-    end,
-    -- remove this object's internal reference, freeing it to be garbage collected
-    delete = function(self, internal)
-        if self == root then return end
-        local p = self.parent
-        internal.parent = nil
-        p.updateChildStatus(self)
-        p.removed(self)
-        self.removedfrom(p)
-        self.deleted()
     end,
     -- change which element is interacting with a press
     setPressTarget = function(self, internal, id, object)
@@ -309,12 +300,6 @@ local objectFunctions = {
 local objectProperties = {
     -- the object which this object is a child of
     parent = {
-        init = function(self, internal)
-            if self ~= root then
-                internal.parent = root
-                root.updateChildStatus(self)
-            end
-        end,
         get = function(self, internal)
             if self == root then
                 -- root is its own parent
@@ -323,33 +308,41 @@ local objectProperties = {
             return internal.parent
         end,
         set = function(self, internal, value)
-            if value == nil then
-                -- shorthand to set default parent
-                value = root
-            end
             if self.parent == value then return end
-            if not isObject(value) then
+            if value ~= nil and not isObject(value) then
                 error(("Parent must be an object (got: %s (%s))"):format(tostring(value), type(value)), 3)
             end
-            if value.isChildOf(self) then
+            if self == value then
+                error(("Cannot assign object as its own parent"), 3)
+            end
+            if value and value.isChildOf(self) then
                 error(("Cannot assign object as the parent of its current parent"), 3)
             end
             -- deactivate in all parent objects
             local e = self
             while e ~= root do
                 e = e.parent
+                if not e or value.isChildOf(e) then break end
                 if e.activeChild == self then
                     e.activeChild = nil
                 end
             end
             local p = self.parent
             internal.parent = value
-            p.updateChildStatus(self)
-            p.removed(self)
-            self.removedfrom(p)
-            self.parent.updateChildStatus(self)
-            self.parent.added(self)
-            self.addedto(self.parent)
+            if p then
+                p.updateChildStatus(self)
+                p.removed(self)
+                self.removedfrom(p)
+            else
+                self.created()
+            end
+            if value then
+                self.parent.updateChildStatus(self)
+                self.parent.added(self)
+                self.addedto(self.parent)
+            else
+                self.deleted()
+            end
         end
     },
     -- a list of this component's children sorted from front to back (computed list, it is reconstructed everytime it's accesed and doesn't reflect any changes)
@@ -385,13 +378,12 @@ local objectProperties = {
         end
     },
     -- whether the object is currently enabled for receiving callbacks
-    isEnabled = {
+    enabledSelf = {
         init = function(self, internal)
             internal.enabled = true
         end,
         get = function(self, internal)
-            if self == root then return internal.enabled end
-            return internal.enabled and (internal.parent and internal.parent.isEnabled)
+            return internal.enabled
         end,
         set = function(self, internal, value)
             if type(value) ~= "boolean" then
@@ -408,6 +400,17 @@ local objectProperties = {
                     self.parent.setPressTarget(p)
                 end
             end
+        end
+    },
+    -- the global enabled state of the object
+    isEnabled = {
+        get = function(self, internal)
+            if not internal.enabled then
+                return false
+            elseif internal.parent then
+                return internal.parent.isEnabled
+            end
+            return true
         end
     },
     -- the currently active child of this object (dosn't have to be a direct child)
@@ -444,6 +447,7 @@ local objectProperties = {
             local e = self
             while e ~= root do
                 e = e.parent
+                if not e then break end
                 if e.activeChild == self then
                     return true
                 end
@@ -675,17 +679,18 @@ local function newObject(object)
     end
     -- copy data back to source table
     for k, v in pairs(data) do
-        local s, e = pcall(setk, object, k, v)
-        if not s then error(e, 2) end
+        if k ~= "parent" then
+            local s, e = pcall(setk, object, k, v)
+            if not s then error(e, 2) end
+        end
     end
+    -- initialize parent
+    local s, e = pcall(setk, object, "parent", data.parent or root)
+    if not s then error(e, 2) end
     -- initialize screen dimensions
     if love and love.graphics then
         object.resize(love.graphics.getDimensions())
     end
-    -- initial parent calls
-    object.created()
-    root.added(object)
-    object.addedto(root)
     
     return object
 end
