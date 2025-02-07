@@ -83,7 +83,7 @@ local callbackNames, activeCallbackNames = {
     "joystickaxis", "joystickhat", "joystickpressed", "joystickreleased",
     "gamepadaxis", "gamepadpressed", "gamepadreleased",
 
-    "added", "removed", "addedto", "removedfrom",
+    "created", "deleted", "added", "removed", "addedto", "removedfrom",
     "activated", "deactivated", "childactivated", "childdeactivated",
     "enabled", "disabled",
 }, {
@@ -255,6 +255,16 @@ local objectFunctions = {
             end
         end
         return false
+    end,
+    -- remove this object's internal reference, freeing it to be garbage collected
+    delete = function(self, internal)
+        if self == root then return end
+        local p = self.parent
+        internal.parent = nil
+        p.updateChildStatus(self)
+        p.removed(self)
+        self.removedfrom(p)
+        self.deleted()
     end,
     -- change which element is interacting with a press
     setPressTarget = function(self, internal, id, object)
@@ -673,6 +683,7 @@ local function newObject(object)
         object.resize(love.graphics.getDimensions())
     end
     -- initial parent calls
+    object.created()
     root.added(object)
     object.addedto(root)
     
