@@ -391,7 +391,7 @@ local objectProperties = {
         end,
         get = function(self, internal)
             if self == root then return internal.enabled end
-            return internal.enabled and internal.parent.isEnabled
+            return internal.enabled and (internal.parent and internal.parent.isEnabled)
         end,
         set = function(self, internal, value)
             if type(value) ~= "boolean" then
@@ -574,7 +574,7 @@ local checks = {
         if type(self.x) ~= "number" or type(self.y) ~= "number" or type(self.w) ~= "number" or type(self.h) ~= "number" then
             return false
         end
-        return (x - self.x)^2 / self.w^2 + (y - self.y)^2 / self.h^2 <= 1
+        return (x - self.x)^2 / (self.w/2)^2 + (y - self.y)^2 / (self.h)/2^2 <= 1
     end
 }
 checks.default = checks.cornerRect
