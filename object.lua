@@ -241,6 +241,15 @@ local objectFunctions = {
             end
             internal.objectPresses[object] = nil
         end
+        self.refreshChildOrder()
+    end,
+    -- recalculate the child order according to z-indexes (used internally)
+    refreshChildOrder = function(self, internal)
+        internal.children = {}
+        for c in pairs(internal.childRegister) do
+            table.insert(internal.children, c)
+        end
+        table.sort(internal.children, function(a, b) return a.z > b.z end)
     end,
     -- traverse the hierarchy upwards and check for object
     isChildOf = function(self, internal, object)
@@ -311,6 +320,7 @@ local objectProperties = {
                 error(("Z value must be a number (got: %s (%s))"):format(tostring(value), type(value)), 3)
             end
             internal.z = value
+            if self.parent then self.parent.refreshChildOrder() end
         end
     },
     -- the object which this object is a child of
@@ -362,12 +372,14 @@ local objectProperties = {
     },
     -- a list of this component's children sorted from front to back (computed list, it is reconstructed everytime it's accesed and doesn't reflect any changes)
     children = {
+        init = function(self, internal)
+            internal.children = newArray()
+        end,
         get = function(self, internal)
             local children = newArray()
-            for e in pairs(internal.childRegister) do
+            for e in pairs(internal.children) do
                 table.insert(children, e)
             end
-            table.sort(children, function(a, b) return a.z > b.z end)
             return children
         end,
         set = function(self, internal, value)
