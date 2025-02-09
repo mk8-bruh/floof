@@ -298,6 +298,21 @@ local objectFunctions = {
 
 -- protected properties of objects; each has an initializer, getter and setter (except for those that don't)
 local objectProperties = {
+    -- the Z-sorting index
+    z = {
+        init = function(self, internal)
+            internal.z = 0
+        end,
+        get = function(self, internal)
+            return internal.z
+        end,
+        set = function(self, internal, value)
+            if type(value) ~= "number" then
+                error(("Z value must be a number (got: %s (%s))"):format(tostring(value), type(value)), 3)
+            end
+            internal.z = value
+        end
+    },
     -- the object which this object is a child of
     parent = {
         get = function(self, internal)
@@ -352,7 +367,7 @@ local objectProperties = {
             for e in pairs(internal.childRegister) do
                 table.insert(children, e)
             end
-            table.sort(children, function(a, b) return (a.z or 0) > (b.z or 0) end)
+            table.sort(children, function(a, b) return a.z > b.z end)
             return children
         end,
         set = function(self, internal, value)
