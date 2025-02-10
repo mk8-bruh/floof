@@ -241,10 +241,10 @@ local objectFunctions = {
             end
             internal.objectPresses[object] = nil
         end
-        self.refreshChildOrder()
+        self.refreshChildren()
     end,
     -- recalculate the child order according to z-indexes (used internally)
-    refreshChildOrder = function(self, internal)
+    refreshChildren = function(self, internal)
         internal.children = {}
         for c in pairs(internal.childRegister) do
             table.insert(internal.children, c)
@@ -307,22 +307,6 @@ local objectFunctions = {
 
 -- protected properties of objects; each has an initializer, getter and setter (except for those that don't)
 local objectProperties = {
-    -- the Z-sorting index
-    z = {
-        init = function(self, internal)
-            internal.z = 0
-        end,
-        get = function(self, internal)
-            return internal.z
-        end,
-        set = function(self, internal, value)
-            if type(value) ~= "number" then
-                error(("Z value must be a number (got: %s (%s))"):format(tostring(value), type(value)), 3)
-            end
-            internal.z = value
-            if self.parent then self.parent.refreshChildOrder() end
-        end
-    },
     -- the object which this object is a child of
     parent = {
         get = function(self, internal)
@@ -370,14 +354,20 @@ local objectProperties = {
             end
         end
     },
-    -- a list of this component's children sorted from front to back (computed list, it is reconstructed everytime it's accesed and doesn't reflect any changes)
+    -- a register of all the children of this object (used internally)
+    childRegister = {
+        init = function(self, internal)
+            internal.childRegister = {}
+        end
+    },
+    -- a list of this component's children sorted from front to back
     children = {
         init = function(self, internal)
             internal.children = newArray()
         end,
         get = function(self, internal)
             local children = newArray()
-            for e in pairs(internal.children) do
+            for i, e in ipairs(internal.children) do
                 table.insert(children, e)
             end
             return children
@@ -398,10 +388,20 @@ local objectProperties = {
             end
         end
     },
-    -- a register of all the children of this object (used internally)
-    childRegister = {
+    -- the Z-sorting index
+    z = {
         init = function(self, internal)
-            internal.childRegister = {}
+            internal.z = 0
+        end,
+        get = function(self, internal)
+            return internal.z
+        end,
+        set = function(self, internal, value)
+            if type(value) ~= "number" then
+                error(("Z value must be a number (got: %s (%s))"):format(tostring(value), type(value)), 3)
+            end
+            internal.z = value
+            if self.parent then self.parent.refreshChildren() end
         end
     },
     -- whether the object is currently enabled for receiving callbacks
@@ -501,7 +501,7 @@ local objectProperties = {
             return self.parent.hoveredChild == self
         end
     },
-    -- the lists of the IDs of all presses currently interacting with this object's children, which are the keys of the table (values are also computed lists)
+    -- the lists of the IDs of all presses currently interacting with this object's children, which are the keys of the table
     objectPresses = {
         init = function(self, internal)
             internal.objectPresses = {}
