@@ -72,7 +72,7 @@ end
 
 -- callback list
 local callbackNames, activeCallbackNames = {
-    "resize", "update", "draw", "quit",
+    "resize", "update", "draw", "latedraw", "quit",
 
     "pressed", "moved", "released", "cancelled",
     "scrolled", "hovered", "unhovered",
@@ -632,12 +632,12 @@ local function newObject(object)
         callbacks[n] = emptyf
         wrappers[n] = n == "draw" and function(...)
             -- custom 'draw' callback that restores the state for neater graphics code
-            if love and love.graphics then
-                love.graphics.push("all") love.graphics.push("all")
-            end
-            if callbacks[n](object, ...) == false then return false end
+            if love and love.graphics then love.graphics.push("all") end
+            if callbacks.draw(object, ...) == false then return false end
             if love and love.graphics then love.graphics.pop() end
-            objectCallbacks[n](object, internal, ...)
+            objectCallbacks.draw(object, internal, ...)
+            if love and love.graphics then love.graphics.push("all") end
+            if callbacks.latedraw(object, ...) == false then return false end
             if love and love.graphics then love.graphics.pop() end
         end or function(...)
             return callbacks[n](object, ...) ~= false and objectCallbacks[n](object, internal, ...)
