@@ -584,7 +584,8 @@ local checks = {
         if type(self.x) ~= "number" or type(self.y) ~= "number" or type(self.w) ~= "number" or type(self.h) ~= "number" then
             return false
         end
-        return x >= self.x and x <= self.x + self.w and y >= self.y and y <= self.y + self.h
+        local l, t, r, b = math.min(self.x, self.x + self.w), math.min(self.y, self.y + self.h), math.max(self.x, self.x + self.w), math.max(self.y, self.y + self.h)
+        return x >= l and x <= r and y >= t and y <= b
     end,
     -- rectangle with center origin (common for normal people)
     centerRect = function(self, x, y)
