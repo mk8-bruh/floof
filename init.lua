@@ -32,7 +32,7 @@ local lib = {
             if type(v) ~= "function" then
                 error(("Attempted to assign a non-function value to %q (got: %s (%s))"):format(tostring(k), tostring(v), type(v)), 2)
             end
-            rawset(t, k, v)
+            object.checks[k] = v
         end
     }),
     is = object.is, isObject = object.is,

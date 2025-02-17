@@ -331,7 +331,7 @@ local objectProperties = {
             local e = self
             while e ~= root do
                 e = e.parent
-                if not e or value.isChildOf(e) then break end
+                if not e or (value and value.isChildOf(e)) then break end
                 if e.activeChild == self then
                     e.activeChild = nil
                 end
