@@ -4,30 +4,88 @@ local _PATH = (...):match("(.-)[^%.]+$")
 local emptyf, identityf = function(...) return end, function(...) return ... end
 local setk = function(t, k, v) t[k] = v end
 
+-- traverse a list of index metas
+local function index(indexes, t, k)
+    for i, index in ipairs(indexes) do
+        local v
+        if type(index) == "table" then
+            v = index[k]
+        elseif type(index) == "function" then
+            local s, e = pcall(index, t, k)
+            if not s then error(e, 2) else v = e end
+        end
+        if v ~= nil then return v end
+    end
+end
+
 -- Python-like array class
 local arrayMt
+local arrays = setmetatable({}, {__mode = "k"})
 local function isArray(t)
-    return getmetatable(t) == arrayMt
+    return arrays[t] or false
 end
 local function newArray(...)
     local array = setmetatable({}, arrayMt)
+    arrays[array] = true
     for i, v in ipairs{...} do
         table.insert(array, v)
     end
     return array
 end
--- number string truncation (get rid of excessive decimals)
-local ntostr = function(n) return tostring(n):match("^(.-)%.?0*$") end
+local arrayMethods = {
+    push = function(t, v, i)
+        if not isArray(t) then return end
+        if type(i) ~= "number" or i ~= math.floor(i) then return end
+        i = i or #t + 1
+        if i <= 0 then
+            i = #t + i + 1
+        end
+        if i <= 0 or i > #t + 1 then return end
+        table.insert(t, i, v)
+    end,
+    pop = function(t, i)
+        if not isArray(t) then return end
+        if type(i) ~= "number" or i ~= math.floor(i) then return end
+        i = i or #t
+        if i <= 0 then
+            i = #t + i + 1
+        end
+        if i <= 0 or i > #t then return end
+        return table.remove(t, i)
+    end,
+    find = function(t, v)
+        if not isArray(t) then return end
+        for i = 1, #t do
+            if t[i] == v then
+                return i
+            end
+        end
+    end,
+    remove = function(t, v)
+        if not isArray(t) then return end
+        for i = 1, #t do
+            if t[i] == v then
+                t:pop(i)
+                return true
+            end
+        end
+    end
+}
+local ntostr = function(n) return tostring(n):match("^(.-%..-)0000.*$") or tostring(n) end -- number string truncation (get rid of excessive decimals)
 arrayMt = {
     __index = function(t, k)
+        if not isArray(t) then return end
         if type(k) == "number" and k == math.floor(k) then
             if k <= 0 then
                 k = #t + k + 1
             end
-            return rawget(t, i)
+            return rawget(t, k)
+        else
+            return arrayMethods[k]
         end
     end,
     __newindex = function(t, k, v)
+        if not isArray(t) then return end
         if type(k) == "number" and k == math.floor(k) then
             if k <= 0 then
                 k = #t + k + 1
@@ -45,6 +103,7 @@ arrayMt = {
         return ("[%s]"):format(s)
     end,
     __concat = function(a, b)
+        if not isArray(a) or not isArray(b) then return end
         local array = setmetatable({}, arrayMt)
         for i, v in ipairs(a) do
             table.insert(array, v)
@@ -53,7 +112,8 @@ arrayMt = {
             table.insert(array, v)
         end
         return array
-    end
+    end,
+    __metatable = {}
 }
 
 -- generalized position grabber (touch/mouse)
@@ -98,8 +158,8 @@ local callbackNames, activeCallbackNames = {
 }
 
 -- object identification
-local objectMt = {}
-local function isObject(value) return getmetatable(value) == objectMt end
+local objects = setmetatable({}, {__mode = "k"})
+local function isObject(value) return objects[value] or false end
 
 -- root object
 local root = {
@@ -301,6 +361,20 @@ local objectFunctions = {
             error(("Invalid index (got: %s (%s))"):format(tostring(i), type(i)), 3)
         end
         return getPressPosition(self.presses[i])
+    end,
+    -- internalize the specified indexing metas
+    protectIndexes = function(self, internal, i, j)
+        if internal.indexes[i] and internal.indexes[j] then
+            for _ = i, j do
+                table.insert(internal._indexes, internal.indexes:pop(i))
+            end
+        elseif internal.indexes[i] and j == nil then
+            table.insert(internal._indexes, internal.indexes:pop(i))
+        elseif i == nil and j == nil then
+            for _ = 1, #internal.indexes do
+                table.insert(internal._indexes, internal.indexes:pop(1))
+            end
+        end
     end
 }
 
@@ -558,13 +632,13 @@ local objectProperties = {
             internal.pressedObjectProxy = setmetatable({}, {
                 __index = internal.pressedObject, __newindex = function(t, k, v)
                     if not getPressPosition(k) then
-                        error(("Invalid press ID: %s (%s)"):format(tostring(k), type(k)), 3)
+                        error(("Invalid press ID: %s (%s)"):format(tostring(k), type(k)), 2)
                     end
                     if v ~= nil and not isObject(v) then
-                        error(("Invalid object (got: %s (%s))"):format(tostring(v), type(v)), 3)
+                        error(("Invalid object (got: %s (%s))"):format(tostring(v), type(v)), 2)
                     end
                     if v ~= nil and v.parent ~= self then
-                        error(("Target must be a child of this object"), 3)
+                        error(("Target must be a child of this object"), 2)
                     end
                     self:setPressTarget(k, v)
                 end
@@ -584,6 +658,16 @@ local objectProperties = {
     isPressed = {
         get = function(self, internal)
             return #self.presses > 0
+        end
+    },
+    -- a list of functions/tables to act as the index meta, in order
+    indexes = {
+        init = function(self, internal)
+            internal.indexes = newArray()
+            internal._indexes = newArray() -- protected indexes
+        end,
+        get = function(self, internal)
+            return internal.indexes
         end
     }
 }
@@ -640,8 +724,9 @@ checks.default = checks.cornerRect
 local function newObject(object)
     object = type(object) == "table" and object or {}
     if not pcall(setmetatable, object, nil) then
-        error("Object with custom metatables are not supported", 2)
+        error("Objects with custom metatables are not supported. If you want to implement an indexing metatable/metamethod, use the 'indexes' field", 2)
     end
+    objects[object] = true
     local name = tostring(object):match("table: (.+)") or tostring(object)
     local data = {}
     -- copy all data out of the source table before transforming it
@@ -676,7 +761,7 @@ local function newObject(object)
     end
     -- custom metatable
     setmetatable(object, {
-        __index = function(t, k)
+        __index = function(_, k)
             if k == "check" then
                 -- default check reflects changes for objects even after construction
                 return function(...) return (check or checks.default)(...) end
@@ -686,9 +771,11 @@ local function newObject(object)
                 return wrappers[k]
             elseif methods[k] then
                 return methods[k]
+            else
+                return index(internal._indexes, object, k) or index(internal.indexes, object, k)
             end
         end,
-        __newindex = function(t, k, v)
+        __newindex = function(_, k, v)
             if k == "check" then
                 if v == nil then
                     check = nil
@@ -698,16 +785,16 @@ local function newObject(object)
                 elseif type(v) == "function" then
                     check = v
                 else
-                    error(("Cannot assign non-function value to %q (got: %s (%s))"):format(k, tostring(v), type(v)), 3)
+                    error(("Cannot assign non-function value to %q (got: %s (%s))"):format(k, tostring(v), type(v)), 2)
                 end
             elseif methods[k] then
-                error(("Cannot override the %q method"):format(tostring(k)), 3)
+                error(("Cannot override the %q method"):format(tostring(k)), 2)
             elseif objectProperties[k] then
                 if objectProperties[k].set then
                     local s, e = pcall(objectProperties[k].set, object, internal, v)
-                    if not s then error(e, 2) end
+                    if not s then error(e, 3) end
                 else
-                    error(("Cannot modify the %q field"):format(tostring(k)), 3)
+                    error(("Cannot modify the %q field"):format(tostring(k)), 2)
                 end
             elseif callbacks[k] then
                 if v == nil then
@@ -717,14 +804,14 @@ local function newObject(object)
                 elseif type(v) == "function" then
                     callbacks[k] = v
                 else
-                    error(("Cannot assign non-function value to %q (got: %s (%s))"):format(k, tostring(v), type(v)), 3)
+                    error(("Cannot assign non-function value to %q (got: %s (%s))"):format(k, tostring(v), type(v)), 2)
                 end
             else
-                rawset(t, k, v)
+                rawset(object, k, v)
             end
         end,
-        __metatable = objectMt,
-        __tostring = function(t) return type(t.tostring) == "function" and t:tostring() or ("object: %s"):format(name) end
+        __metatable = {},
+        __tostring = function(t) return type(object.tostring) == "function" and object:tostring() or type(object.tostring) == "string" and object.tostring or ("%s: %s"):format(object.name or "object", name) end
     })
     -- initialize properties
     for k, v in pairs(objectProperties) do
