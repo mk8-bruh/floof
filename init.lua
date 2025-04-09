@@ -2,25 +2,6 @@ local _PATH = ...
 local object = require(_PATH .. ".object")
 local class  = require(_PATH .. ".class" )
 
-local loveCallbackNames, blockingCallbackNames = {
-    "resize", "update", "draw", "quit",
-
-    "mousepressed", "mousemoved", "mousereleased", "wheelmoved",
-    "touchpressed", "touchmoved", "touchreleased",
-
-    "keypressed", "keyreleased", "textinput",
-    "filedropped", "directorydropped",
-    "joystickadded", "joystickremoved",
-    "joystickaxis", "joystickhat", "joystickpressed", "joystickreleased",
-    "gamepadaxis", "gamepadpressed", "gamepadreleased"
-}, {
-    "keypressed", "keyreleased", "textinput",
-    "filedropped", "directorydropped",
-    "joystickadded", "joystickremoved",
-    "joystickaxis", "joystickhat", "joystickpressed", "joystickreleased",
-    "gamepadaxis", "gamepadpressed", "gamepadreleased"
-}
-
 local emptyf, identityf = function(...) return end, function(...) return ... end
 
 local presses = {}
@@ -125,7 +106,7 @@ return setmetatable({}, {
 	__metatable = {},
 	__tostring = function() return 'FLUFFI :3' end,
     __call = function(_, ...)
-        local s, v = xpcall(lib.new, ...)
+        local s, v = pcall(lib.new, ...)
         if not s then
             error(v, 2)
         else

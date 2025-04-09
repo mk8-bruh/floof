@@ -1,77 +1,5 @@
 -- dummy functions
--- dummy functions
 local emptyf, identityf = function(...) return end, function(...) return ... end
-local setk = function(t, k, v) t[k] = v end
-
--- Python-like array class
-local arrayMt
-local function isArray(t)
-    return getmetatable(t) == arrayMt
-end
-local function newArray(...)
-    local array = setmetatable({}, arrayMt)
-    for i, v in ipairs{...} do
-        table.insert(array, v)
-    end
-    return array
-end
--- number string truncation (get rid of excessive decimals)
-local ntostr = function(n) return tostring(n):match("^(.-)%.?0*$") end
-arrayMt = {
-    __index = function(t, k)
-        if type(k) == "number" and k == math.floor(k) then
-            if k <= 0 then
-                k = #t + k + 1
-            end
-            return rawget(t, i)
-        end
-    end,
-    __newindex = function(t, k, v)
-        if type(k) == "number" and k == math.floor(k) then
-            if k <= 0 then
-                k = #t + k + 1
-            end
-            if k <= 0 or k > #t + 1 then return end
-            rawset(t, k, v)
-        end
-    end,
-    __tostring = function(t)
-        if #t == 0 then return "[]" end
-        local s = ntostr(t[1]) or tostring(t[1])
-        for i = 2, #t do
-            s = s .. (", %s"):format(ntostr(t[i]) or tostring(t[i]))
-        end
-        return ("[%s]"):format(s)
-    end,
-    __concat = function(a, b)
-        local array = setmetatable({}, arrayMt)
-        for i, v in ipairs(a) do
-            table.insert(array, v)
-        end
-        for i, v in ipairs(b) do
-            table.insert(array, v)
-        end
-        return array
-    end
-}
-
--- generalized position grabber (touch/mouse)
-local function getPressPosition(id)
-    if type(id) == "number" then
-        if love and love.mouse then
-            return love.mouse.getPosition()
-        end
-    else
-        if love and love.touch then
-            local s, x, y = pcall(love.touch.getPosition, id)
-            if s then
-                return x, y
-            end
-        end
-    end
-end
-
--- callback list
 local setk = function(t, k, v) t[k] = v end
 
 -- Python-like array class
@@ -159,11 +87,6 @@ local callbackNames, activeCallbackNames = {
     "created", "deleted", "added", "removed", "addedto", "removedfrom",
     "activated", "deactivated", "childactivated", "childdeactivated",
     "enabled", "disabled",
-    "gamepadaxis", "gamepadpressed", "gamepadreleased",
-
-    "created", "deleted", "added", "removed", "addedto", "removedfrom",
-    "activated", "deactivated", "childactivated", "childdeactivated",
-    "enabled", "disabled",
 }, {
     "keypressed", "keyreleased", "textinput",
     "filedropped", "directorydropped",
@@ -173,17 +96,14 @@ local callbackNames, activeCallbackNames = {
 }
 
 -- object identification
--- object identification
 local objectMt = {}
 local function isObject(value) return getmetatable(value) == objectMt end
 
--- root object
 -- root object
 local root = {
     check = true
 }
 
--- unique object callbacks
 -- unique object callbacks
 local objectCallbacks = {
     resize = function(self, internal, w, h)
@@ -233,10 +153,6 @@ local objectCallbacks = {
             -- track all presses in root
             table.insert(internal.objectPresses[self], id)
         end
-        if self == root then
-            -- track all presses in root
-            table.insert(internal.objectPresses[self], id)
-        end
         for i, e in ipairs(t) do
             if e.isEnabled and e:check(x, y) and e:pressed(x, y, id) ~= false then
                 self:setPressTarget(id, e)
@@ -264,15 +180,6 @@ local objectCallbacks = {
                 end
             end
         end
-        if self == root then
-            -- find and remove press from root
-            for i, o in ipairs(internal.objectPresses[self]) do
-                if o == id then
-                    table.remove(internal.objectPresses[self], i)
-                    break
-                end
-            end
-        end
         if self.pressedObject[id] then
             self.pressedObject[id]:released(x, y, id)
             self:setPressTarget(id)
@@ -288,7 +195,6 @@ local objectCallbacks = {
 }
 
 -- default callbacks called on the active element
--- default callbacks called on the active element
 for i, n in ipairs(activeCallbackNames) do
     objectCallbacks[n] = objectCallbacks[n] or function(self, internal, ...)
         if internal.active and internal.active.isEnabled then
@@ -300,17 +206,10 @@ for i, n in ipairs(activeCallbackNames) do
 end
 
 -- remaining empty callbacks
--- remaining empty callbacks
 for i, n in ipairs(callbackNames) do
     objectCallbacks[n] = objectCallbacks[n] or emptyf
 end
 
--- methods for object interaction (can access the internal state)
-local objectFunctions = {
-    -- update the status of the object in this object's register (used internally)
-    updateChildStatus = function(self, internal, object)
-        if not isObject(object) then
-            error(("Invalid object (got: %s (%s))"):format(tostring(object), type(object)), 3)
 -- methods for object interaction (can access the internal state)
 local objectFunctions = {
     -- update the status of the object in this object's register (used internally)
@@ -347,7 +246,6 @@ local objectFunctions = {
         while e ~= root do
             e = e.parent
             if not e then break end
-            if not e then break end
             if e == object then
                 return true
             end
@@ -355,15 +253,14 @@ local objectFunctions = {
         return false
     end,
     -- change which element is interacting with a press
-    -- change which element is interacting with a press
     setPressTarget = function(self, internal, id, object)
         if not getPressPosition(id) then
             error(("Invalid press ID: %s (%s)"):format(tostring(id), type(id)), 3)
         end
-        if object ~= null and not isObject(object) then
+        if object ~= nil and not isObject(object) then
             error(("Invalid object (got: %s (%s))"):format(tostring(object), type(object)), 3)
         end
-        if object ~= null and object.parent ~= self then
+        if object ~= nil and object.parent ~= self then
             error(("Target must be a child of this object"), 3)
         end
         local p = internal.pressedObject[id]
@@ -371,7 +268,6 @@ local objectFunctions = {
         if p then
             for i, o in ipairs(internal.objectPresses[p]) do
                 if o == id then
-                    table.remove(internal.objectPresses[p], i)
                     table.remove(internal.objectPresses[p], i)
                     break
                 end
@@ -401,25 +297,13 @@ local objectFunctions = {
         end
         if not self.presses[i] then
             error(("Invalid index (got: %s (%s))"):format(tostring(i), type(i)), 3)
-    end,
-    -- get the position of the i-th press on this element, or the most recent press if unspecified
-    getPressPosition = function(self, internal, i)
-        if i == nil then
-            i = -1
         end
-        if not self.presses[i] then
-            error(("Invalid index (got: %s (%s))"):format(tostring(i), type(i)), 3)
-        end
-        return getPressPosition(self.presses[i])
         return getPressPosition(self.presses[i])
     end
 }
 
 -- protected properties of objects; each has an initializer, getter and setter (except for those that don't)
-
--- protected properties of objects; each has an initializer, getter and setter (except for those that don't)
 local objectProperties = {
-    -- the object which this object is a child of
     -- the object which this object is a child of
     parent = {
         get = function(self, internal)
@@ -428,15 +312,9 @@ local objectProperties = {
                 return self
             end
             return internal.parent
-            if self == root then
-                -- root is its own parent
-                return self
-            end
-            return internal.parent
         end,
         set = function(self, internal, value)
             if self.parent == value then return end
-            if value ~= nil and not isObject(value) then
             if value ~= nil and not isObject(value) then
                 error(("Parent must be an object (got: %s (%s))"):format(tostring(value), type(value)), 3)
             end
@@ -480,11 +358,7 @@ local objectProperties = {
         end
     },
     -- a list of this component's children sorted from front to back
-    -- a list of this component's children sorted from front to back
     children = {
-        init = function(self, internal)
-            internal.children = newArray()
-        end,
         init = function(self, internal)
             internal.children = newArray()
         end,
@@ -498,9 +372,7 @@ local objectProperties = {
         end,
         set = function(self, internal, value)
             -- shorthand for setting this object as parent to each of the objects
-            -- shorthand for setting this object as parent to each of the objects
             if type(value) ~= "table" then
-                error(("Value must be a table of objects (got:  %s (%s))"):format(tostring(value), type(value)), 3)
                 error(("Value must be a table of objects (got:  %s (%s))"):format(tostring(value), type(value)), 3)
             end
             for i, v in ipairs(value) do
@@ -516,10 +388,7 @@ local objectProperties = {
     },
     -- the Z-sorting index
     z = {
-    -- the Z-sorting index
-    z = {
         init = function(self, internal)
-            internal.z = 0
             internal.z = 0
         end,
         get = function(self, internal)
@@ -535,13 +404,10 @@ local objectProperties = {
     },
     -- whether the object is currently enabled for receiving callbacks
     enabledSelf = {
-    -- whether the object is currently enabled for receiving callbacks
-    enabledSelf = {
         init = function(self, internal)
             internal.enabled = true
         end,
         get = function(self, internal)
-            return internal.enabled
             return internal.enabled
         end,
         set = function(self, internal, value)
@@ -572,7 +438,6 @@ local objectProperties = {
             return true
         end
     },
-    -- the currently active child of this object (dosn't have to be a direct child)
     -- the global enabled state of the object
     isEnabled = {
         get = function(self, internal)
@@ -613,7 +478,6 @@ local objectProperties = {
         end
     },
     -- whether this object is active in one of it's ancestors
-    -- whether this object is active in one of it's ancestors
     isActive = {
         get = function(self, internal)
             local e = self
@@ -629,7 +493,6 @@ local objectProperties = {
         end
     },
     -- the (top-most) child of this object which is currently hovered by the mouse
-    -- the (top-most) child of this object which is currently hovered by the mouse
     hoveredChild = {
         get = function(self, internal)
             if love and love.mouse then
@@ -643,24 +506,19 @@ local objectProperties = {
         end
     },
     -- whether this object is currently hovered by the mouse
-    -- whether this object is currently hovered by the mouse
     isHovered = {
         get = function(self, internal)
             return self.parent.hoveredChild == self
-            return self.parent.hoveredChild == self
         end
     },
-    -- the lists of the IDs of all presses currently interacting with this object's children, which are the keys of the table
     -- the lists of the IDs of all presses currently interacting with this object's children, which are the keys of the table
     objectPresses = {
         init = function(self, internal)
             internal.objectPresses = {}
             if self == root then
                 -- root press register
-                -- root press register
                 internal.objectPresses[self] = newArray()
             end
-            -- proxy table for public access
             -- proxy table for public access
             internal.objectPressesProxy = setmetatable({}, {
                 __index = function(t, k)
@@ -679,12 +537,10 @@ local objectProperties = {
         end
     },
     -- the IDs of the most recent presses on this object's children (again, entry per child)
-    -- the IDs of the most recent presses on this object's children (again, entry per child)
     objectPress = {
         init = function(self, internal)
             internal.objectPressProxy = setmetatable({}, {
                 __index = function(t, k)
-                    return self.objectPresses[k] and self.objectPresses[k][-1] or nil
                     return self.objectPresses[k] and self.objectPresses[k][-1] or nil
                 end, __newindex = __emptyf
             })
@@ -694,18 +550,16 @@ local objectProperties = {
         end
     },
     -- a press register storing which object a press is currently interacting with
-    -- a press register storing which object a press is currently interacting with
     pressedObject = {
         init = function(self, internal)
             internal.pressedObject = {}
-            -- public proxy
             -- public proxy
             internal.pressedObjectProxy = setmetatable({}, {
                 __index = internal.pressedObject, __newindex = function(t, k, v)
                     if not getPressPosition(k) then
                         error(("Invalid press ID: %s (%s)"):format(tostring(k), type(k)), 3)
                     end
-                    if v ~= null and not isObject(v) then
+                    if v ~= nil and not isObject(v) then
                         error(("Invalid object (got: %s (%s))"):format(tostring(v), type(v)), 3)
                     end
                     if v ~= nil and v.parent ~= self then
@@ -720,13 +574,11 @@ local objectProperties = {
         end
     },
     -- the list of the IDs of all presses currently interacting with this object
-    -- the list of the IDs of all presses currently interacting with this object
     presses = {
         get = function(self, internal)
             return self.parent.objectPresses[self]
         end
     },
-    -- the ID of the most recent press interacting with this object
     -- the ID of the most recent press interacting with this object
     isPressed = {
         get = function(self, internal)
@@ -736,12 +588,7 @@ local objectProperties = {
 }
 
 -- pre-defined checking functions for different common shapes
-    }
-}
-
--- pre-defined checking functions for different common shapes
 local checks = {
-    -- rectangle with top-left origin (common for LÖVE)
     -- rectangle with top-left origin (common for LÖVE)
     cornerRect = function(self, x, y)
         if type(self.x) ~= "number" or type(self.y) ~= "number" or type(self.w) ~= "number" or type(self.h) ~= "number" then
@@ -749,10 +596,7 @@ local checks = {
         end
         local l, t, r, b = math.min(self.x, self.x + self.w), math.min(self.y, self.y + self.h), math.max(self.x, self.x + self.w), math.max(self.y, self.y + self.h)
         return x >= l and x <= r and y >= t and y <= b
-        local l, t, r, b = math.min(self.x, self.x + self.w), math.min(self.y, self.y + self.h), math.max(self.x, self.x + self.w), math.max(self.y, self.y + self.h)
-        return x >= l and x <= r and y >= t and y <= b
     end,
-    -- rectangle with center origin (common for normal people)
     -- rectangle with center origin (common for normal people)
     centerRect = function(self, x, y)
         if type(self.x) ~= "number" or type(self.y) ~= "number" or type(self.w) ~= "number" or type(self.h) ~= "number" then
@@ -792,30 +636,21 @@ local checks = {
 checks.default = checks.cornerRect
 
 -- object constructor
--- object constructor
 local function newObject(object)
     object = type(object) == "table" and object or {}
-    if not pcall(setmetatable, object, nil) then
-        error("Object with custom metatables are not supported", 2)
-    end
     if not pcall(setmetatable, object, nil) then
         error("Object with custom metatables are not supported", 2)
     end
     local name = tostring(object):match("table: (.+)") or tostring(object)
     local data = {}
     -- copy all data out of the source table before transforming it
-    -- copy all data out of the source table before transforming it
     for k, v in pairs(object) do data[k], object[k] = v, nil end
-    -- private variables
     -- private variables
     local internal = {}
     -- overlay callback functions, callback wrappers that package the overlay and the internal callback, and method wrappers that expose the internal table
-    -- overlay callback functions, callback wrappers that package the overlay and the internal callback, and method wrappers that expose the internal table
     local callbacks, wrappers, methods = {}, {}, {}
     -- the current checking function of the object
-    -- the current checking function of the object
     local check = nil
-    -- construct callback wrappers
     -- construct callback wrappers
     for i, n in ipairs(callbackNames) do
         callbacks[n] = emptyf
@@ -833,13 +668,11 @@ local function newObject(object)
         end
     end
     -- method wrappers
-    -- method wrappers
     for k, f in pairs(objectFunctions) do
         methods[k] = function(self, ...)
             return f(self, internal, ...)
         end
     end
-    -- custom metatable
     -- custom metatable
     setmetatable(object, {
         __index = function(t, k)
@@ -860,7 +693,6 @@ local function newObject(object)
                     check = nil
                 elseif type(v) == "boolean" then
                     -- a shorthand for an infinite/non-existent hitbox
-                    -- a shorthand for an infinite/non-existent hitbox
                     check = function() return v end
                 elseif type(v) == "function" then
                     check = v
@@ -872,7 +704,6 @@ local function newObject(object)
             elseif objectProperties[k] then
                 if objectProperties[k].set then
                     local s, e = pcall(objectProperties[k].set, object, internal, v)
-                    if not s then error(e, 2) end
                     if not s then error(e, 2) end
                 else
                     error(("Cannot modify the %q field"):format(tostring(k)), 3)
@@ -895,21 +726,9 @@ local function newObject(object)
         __tostring = function(t) return type(t.tostring) == "function" and t:tostring() or ("object: %s"):format(name) end
     })
     -- initialize properties
-    -- initialize properties
     for k, v in pairs(objectProperties) do
         if v.init then v.init(object, internal) end
     end
-    -- copy data back to source table
-    for k, v in pairs(data) do
-        if k ~= "parent" then
-            local s, e = pcall(setk, object, k, v)
-            if not s then error(e, 2) end
-        end
-    end
-    -- initialize parent
-    local s, e = pcall(setk, object, "parent", data.parent or root)
-    if not s then error(e, 2) end
-    -- initialize screen dimensions
     -- copy data back to source table
     for k, v in pairs(data) do
         if k ~= "parent" then
