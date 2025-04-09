@@ -1,3 +1,5 @@
+local _PATH = (...):match("(.-)[^%.]+$")
+
 -- dummy functions
 local emptyf, identityf = function(...) return end, function(...) return ... end
 local setk = function(t, k, v) t[k] = v end
@@ -364,7 +366,6 @@ local objectProperties = {
         end,
         get = function(self, internal)
             local children = newArray()
-            for i, e in ipairs(internal.children) do
             for i, e in ipairs(internal.children) do
                 table.insert(children, e)
             end

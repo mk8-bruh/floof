@@ -1,4 +1,4 @@
-local _PATH = ...
+local _PATH = (...):match("(.-)[^%.]+$")
 local object = require(_PATH .. ".object")
 
 local class = {}
@@ -29,7 +29,7 @@ function class.new(...)
     return setmetatable(c, {
         __index = function(c, k) return int[k] or class[k] end,
         __newindex = function() end,
-        __call = classMethods.new,
+        __call = class.new,
         __tostring = function(c) return ("class: %s"):format(c.name or tostring(c):match("table: (.+)") or tostring(c)) end
     })
 end
