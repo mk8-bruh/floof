@@ -19,24 +19,16 @@ local function index(indexes, t, k)
 end
 
 -- Python-like array class
-local arrayMt
 local arrays = setmetatable({}, {__mode = "k"})
 local function isArray(t)
     return arrays[t] or false
 end
-local function newArray(...)
-    local array = setmetatable({}, arrayMt)
-    arrays[array] = true
-    for i, v in ipairs{...} do
-        table.insert(array, v)
-    end
-    return array
-end
+local ntostr = function(n) return tostring(n):match("^(.-%..-)0000.*$") or tostring(n) end -- number string truncation (get rid of excessive decimals)
 local arrayMethods = {
     push = function(t, v, i)
         if not isArray(t) then return end
         if type(i) ~= "number" or i ~= math.floor(i) then return end
-        i = i or #t + 1
+        i = i or 1
         if i <= 0 then
             i = #t + i + 1
         end
@@ -46,12 +38,16 @@ local arrayMethods = {
     pop = function(t, i)
         if not isArray(t) then return end
         if type(i) ~= "number" or i ~= math.floor(i) then return end
-        i = i or #t
+        i = i or 1
         if i <= 0 then
             i = #t + i + 1
         end
         if i <= 0 or i > #t then return end
         return table.remove(t, i)
+    end,
+    append = function(t, v)
+        if not isArray(t) then return end
+        table.insert(t, v)
     end,
     find = function(t, v)
         if not isArray(t) then return end
@@ -71,8 +67,7 @@ local arrayMethods = {
         end
     end
 }
-local ntostr = function(n) return tostring(n):match("^(.-%..-)0000.*$") or tostring(n) end -- number string truncation (get rid of excessive decimals)
-arrayMt = {
+local arrayMt = {
     __index = function(t, k)
         if not isArray(t) then return end
         if type(k) == "number" and k == math.floor(k) then
@@ -96,11 +91,11 @@ arrayMt = {
     end,
     __tostring = function(t)
         if #t == 0 then return "[]" end
-        local s = ntostr(t[1]) or tostring(t[1])
+        local s = "["..ntostr(t[1])
         for i = 2, #t do
-            s = s .. (", %s"):format(ntostr(t[i]) or tostring(t[i]))
+            s = s .. (", %s"):format(ntostr(t[i]))
         end
-        return ("[%s]"):format(s)
+        return s.."]"
     end,
     __concat = function(a, b)
         if not isArray(a) or not isArray(b) then return end
@@ -115,6 +110,14 @@ arrayMt = {
     end,
     __metatable = {}
 }
+local function newArray(...)
+    local array = setmetatable({}, arrayMt)
+    arrays[array] = true
+    for i, v in ipairs{...} do
+        table.insert(array, v)
+    end
+    return array
+end
 
 -- generalized position grabber (touch/mouse)
 local function getPressPosition(id)
@@ -365,14 +368,15 @@ local objectFunctions = {
     -- internalize the specified indexing metas
     protectIndexes = function(self, internal, i, j)
         if internal.indexes[i] and internal.indexes[j] then
-            for _ = i, j do
-                table.insert(internal._indexes, internal.indexes:pop(i))
+            i, j = math.max(i, j), math.min(i, j)
+            for k = i, j, -1 do
+                internal._indexes:push(internal.indexes:pop(k))
             end
         elseif internal.indexes[i] and j == nil then
-            table.insert(internal._indexes, internal.indexes:pop(i))
+            internal._indexes:push(internal.indexes:pop(i))
         elseif i == nil and j == nil then
-            for _ = 1, #internal.indexes do
-                table.insert(internal._indexes, internal.indexes:pop(1))
+            for k = #internal.indexes, 1, -1 do
+                internal._indexes:push(internal.indexes:pop(k))
             end
         end
     end
@@ -772,7 +776,7 @@ local function newObject(object)
             elseif methods[k] then
                 return methods[k]
             else
-                return index(internal._indexes, object, k) or index(internal.indexes, object, k)
+                return index(internal.indexes, object, k) or index(internal._indexes, object, k)
             end
         end,
         __newindex = function(_, k, v)

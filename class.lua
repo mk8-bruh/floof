@@ -35,7 +35,6 @@ local function _create(c, ...)
 end
 
 local function create(c, ...)
-    if not object[c] == c then error(("Must specify a valid class object (received %s)"):format(type(c)), 2) end
     local o, d = _create(c, ...)
     o.protectIndexes(-d, -1)
     return o
@@ -46,10 +45,10 @@ local function new(_, ...)
     if arg[1] and type(arg[1]) ~= "string" then
         table.insert(arg, 1, nil)
     end
-    if arg[2] and object[arg[2]] ~= arg[2] then
+    if arg[2] and clrefs[arg[2]] ~= arg[2] then
         table.insert(arg, 2, nil)
     end
-    if not type(arg[3]) == "table" then
+    if type(arg[3]) ~= "table" or getmetatable(arg[3]) then
         table.insert(arg, 3, {})
     end
     local name, super, c = arg[1], arg[2], arg[3]
