@@ -1,8 +1,9 @@
 local _PATH = (...):match("(.-)[^%.]+$")
 
 -- dummy functions
-local emptyf, identityf = function(...) return end, function(...) return ... end
-local setk = function(t, k, v) t[k] = v end
+local emptyf    = function(...) return end
+local identityf = function(...) return ... end
+local setk      = function(t, k, v) t[k] = v end
 
 -- traverse a list of index metas
 local function index(indexes, t, k)
