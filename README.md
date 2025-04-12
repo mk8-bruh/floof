@@ -59,21 +59,18 @@ function Player:init()
 end
 
 function Player:update(dt)
-    self.x = self.x + 50 * dt
+    self.x = self.x + 50 * self.horizontalInput * dt
 end
 
 function Player:draw()
     love.graphics.rectangle("fill", self.x, self.y, 32, 32)
 end
 
--- Create a root GameObject and attach the Player behavior
 function love.load()
     player = Player()
-end
 
--- Hook into LOVE2D callbacks
-function love.update(dt) floof.update(dt) end
-function love.draw() floof.draw() end
+    floof.init() -- hook into LOVE2D callbacks
+end
 
 ```
 
