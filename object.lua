@@ -59,10 +59,9 @@ local arrayMethods = {
     end,
     remove = function(t, v)
         if not isArray(t) then return end
-        for i = 1, #t do
+        for i = #t, 1, -1 do
             if t[i] == v then
                 t:pop(i)
-                return true
             end
         end
     end
