@@ -91,6 +91,14 @@ local parent = floof.new{
     }
 }
 local child2 = floof.new{ parent = parent }
+local child3 = floof.new{}
+child3.parent = child2
+```
+```
+parent
+├── child1
+└── child2
+    └── child3
 ```
 
 Built-in fields:
