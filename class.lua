@@ -75,6 +75,6 @@ return setmetatable({}, {
     __index = function(_, k) return class[k] or named[k] end,
     __newindex = function() end,
 	__metatable = {},
-    __tostring = function() return "FLUFFI class module :3" end,
+    __tostring = function() return "FLOOF class module" end,
     __call = new,
 })

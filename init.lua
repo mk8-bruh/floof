@@ -104,7 +104,7 @@ return setmetatable({}, {
 	__index = lib,
 	__newindex = emptyf,
 	__metatable = {},
-	__tostring = function() return 'FLUFFI :3' end,
+	__tostring = function() return 'FLOOF' end,
     __call = function(_, ...)
         local s, v = pcall(lib.new, ...)
         if not s then
