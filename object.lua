@@ -374,6 +374,8 @@ local objectFunctions = {
             end
         elseif internal.indexes[i] and j == nil then
             internal._indexes:push(internal.indexes:pop(i))
+        elseif internal.indexes:find(i) and j == nil then
+            internal._indexes:push(internal.indexes:pop(internal.indexes:find(i)))
         elseif i == nil and j == nil then
             for k = #internal.indexes, 1, -1 do
                 internal._indexes:push(internal.indexes:pop(k))
@@ -692,20 +694,6 @@ local checks = {
             return false
         end
         return x >= self.x - self.w/2 and x <= self.x + self.w/2 and y >= self.y - self.h/2 and y <= self.y + self.h/2
-    end,
-    -- circle with center  origin
-    circle = function(self, x, y)
-        if type(self.x) ~= "number" or type(self.y) ~= "number" or type(self.r) ~= "number" then
-            return false
-        end
-        return (x - self.x)^2 + (y - self.y)^2 <= self.r^2
-    end,
-    -- ellipse with center origin
-    ellipse = function(self, x, y)
-        if type(self.x) ~= "number" or type(self.y) ~= "number" or type(self.w) ~= "number" or type(self.h) ~= "number" then
-            return false
-        end
-        return (x - self.x)^2 / (self.w/2)^2 + (y - self.y)^2 / (self.h)/2^2 <= 1
     end,
     -- circle with center  origin
     circle = function(self, x, y)

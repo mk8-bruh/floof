@@ -14,7 +14,6 @@ local lib = {
                 error(("Attempted to assign a non-function value to %q (got: %s (%s))"):format(tostring(k), tostring(v), type(v)), 2)
             end
             object.checks[k] = v
-            object.checks[k] = v
         end
     }),
     is = object.is, isObject = object.is,
@@ -22,7 +21,6 @@ local lib = {
     root = object.root,
     class = class,
     init = function()
-        if not love then return end
         if not love then return end
         local root = object.root
         local old = {}
