@@ -6,6 +6,9 @@ local array = require(_PATH .. ".array")
 o_inj.class,  o_inj.array = class,  array
 c_inj.object, c_inj.array = object, array
 
+local root = object.new{check = true}
+o_inj.root = root
+
 local emptyf, identityf = function(...) return end, function(...) return ... end
 
 local presses = {}
@@ -22,11 +25,10 @@ local lib = {
     }),
     is = object.is, isObject = object.is,
     new = object.new, newObject = object.new,
-    root = object.root,
+    root = root,
     class = class,
     init = function()
         if not love then return end
-        local root = object.root
         local old = {}
         for _, f in ipairs(loveCallbackNames) do
             old[f] = love[f] or emptyf

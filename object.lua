@@ -65,11 +65,6 @@ local callbackNames, activeCallbackNames = {
 local objects = setmetatable({}, {__mode = "k"})
 local function isObject(value) return objects[value] or false end
 
--- root object
-local root = {
-    check = true
-}
-
 -- unique object callbacks
 local objectCallbacks = {
     resize = function(self, internal, w, h)
@@ -115,7 +110,7 @@ local objectCallbacks = {
     end,
     pressed = function(self, internal, x, y, id)
         local t = self.children
-        if self == root then
+        if self == inj.root then
             -- track all presses in root
             table.insert(internal.objectPresses[self], id)
         end
@@ -137,7 +132,7 @@ local objectCallbacks = {
         end
     end,
     released = function(self, internal, x, y, id)
-        if self == root then
+        if self == inj.root then
             -- find and remove press from root
             for i, o in ipairs(internal.objectPresses[self]) do
                 if o == id then
@@ -209,7 +204,7 @@ local objectFunctions = {
             error(("Invalid object (got: %s (%s))"):format(tostring(object), type(object)), 3)
         end
         local e = self
-        while e ~= root do
+        while e ~= inj.root do
             e = e.parent
             if not e then break end
             if e == object then
@@ -244,7 +239,7 @@ local objectFunctions = {
         local x, y = getPressPosition(id)
         if object and object:pressed(x, y, id) then
             table.insert(internal.objectPresses[object], id)
-        elseif self == root and not p then
+        elseif self == inj.root and not p then
             -- remove press from root
             for i, o in ipairs(internal.objectPresses[self]) do
                 if o == id then
@@ -273,7 +268,7 @@ local objectProperties = {
     -- the object which this object is a child of
     parent = {
         get = function(self, internal)
-            if self == root then
+            if self == inj.root then
                 -- root is its own parent
                 return self
             end
@@ -292,7 +287,7 @@ local objectProperties = {
             end
             -- deactivate in all parent objects
             local e = self
-            while e ~= root do
+            while e ~= inj.root do
                 e = e.parent
                 if not e or (value and value:isChildOf(e)) then break end
                 if e.activeChild == self then
@@ -427,7 +422,7 @@ local objectProperties = {
             if value ~= nil and not value:isChildOf(self) then
                 error(("Active child must be a child of the object"), 3)
             end
-            if value == root then
+            if value == inj.root then
                 error(("Cannot set root as the active child"), 3)
             end
             if self.activeChild then
@@ -446,7 +441,7 @@ local objectProperties = {
     isActive = {
         get = function(self, internal)
             local e = self
-            while e ~= root do
+            while e ~= inj.root do
                 e = e.parent
                 if not e then break end
                 if not e then break end
@@ -480,7 +475,7 @@ local objectProperties = {
     objectPresses = {
         init = function(self, internal)
             internal.objectPresses = {}
-            if self == root then
+            if self == inj.root then
                 -- root press register
                 internal.objectPresses[self] = inj.array.new()
             end
@@ -697,7 +692,7 @@ local function newObject(object, index)
         end
     end
     -- initialize parent
-    local s, e = pcall(setk, object, "parent", data.parent or root)
+    local s, e = pcall(setk, object, "parent", data.parent or inj.root)
     if not s then error(e, 2) end
     -- initialize screen dimensions
     if love and love.graphics then
@@ -707,11 +702,8 @@ local function newObject(object, index)
     return object
 end
 
-root = newObject(root)
-
 return {
     is = isObject,
     new = newObject,
-    root = root,
     checks = checks
 }, inj
