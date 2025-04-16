@@ -1,42 +1,50 @@
 local _PATH = (...):match("(.-)[^%.]+$")
+local array  = require(_PATH .. ".array" )
 local object = require(_PATH .. ".object")
+
+local function _index(indexes, t, k, visited)
+    for i, index in ipairs(indexes) do
+        local v
+        if type(index) == "table" then
+            v = index[k]
+        elseif type(index) == "function" then
+            local s, e = pcall(index, t, k)
+            if not s then error(("Error while trying to access field %s (layer %d, %s): %s"):format(type(k) == "string" and '"'..k..'"' or tostring(k), i, tostring(index), e), 3) else v = e end
+        end
+        if v ~= nil then return v end
+    end
+end
 
 local class  = {}
 local named  = setmetatable({}, {__mode = "v"}) -- { name : class }
 local clrefs = setmetatable({}, {__mode = "k"}) -- { class: self  | object: class }
 local supers = setmetatable({}, {__mode = "k"}) -- { class: super | object: super }
 
-function class.is(o, u)
-    return clrefs[o] == u
+function class.is(o, c)
+    return o and c and (clrefs[o] == c or class.is(class.super(o), c)) or o and clrefs[o] == o
 end
 
 function class.class(o)
-    return clrefs[o]
+    return o and clrefs[o]
 end
 
 function class.super(o)
-    return supers[o]
+    return o and supers[o]
 end
 
-local function _create(c, ...)
-    if not c then
-        local o = object.new()
-        o.indexes:push(class)
-        return o, 0
+function class.index(o, ...)
+    if o and clrefs[o] then
+        for k, i in ipairs{...} do
+            o.indexes:push(i, k)
+        end
     end
-    local o, d = _create(supers[c], ...)
-    o.indexes:push(c, 1)
-    clrefs[o] = c
-    supers[o] = supers[c]
-    if type(o.init) == "function" then
-        o:init(...)
-    end
-    return o, d + 1
 end
 
 local function create(c, ...)
-    local o, d = _create(c, ...)
-    o.protectIndexes(-d, -1)
+    local o = object.new({}, c)
+    if type(o.init) == "function" then
+        o:init(...)
+    end
     return o
 end
 
@@ -64,7 +72,45 @@ local function new(_, ...)
     name = name or tostring(c):match("table: (.+)") or tostring(c)
     clrefs[c] = c
     supers[c] = super
+    local indexes
+    if array.is(c.indexes) then
+        indexes = c.indexes
+    else
+        indexes = array.new()
+        if type(c.indexes) == "table" then
+            for i, v in ipairs(c.indexes) do
+                indexes:append(v)
+            end
+        end
+    end
+    c.name = nil
+    c.indexes = nil
     return setmetatable(c, {
+        __index = function(c, k)
+            if k == "name" then
+                return name
+            elseif k == "indexes" then
+                return indexes
+            else
+                return _index(indexes, c, k) or super[k] or class[k]
+            end
+        end,
+        __newindex = function(c, k, v)
+            if k == "name" then
+                if type(v) == "string" then
+                    if named[v] then
+                        error(("A class named %q already exists"):format(v), 2)
+                    end
+                    name = v
+                    named[v] = c
+                elseif v == nil then
+                    named[name] = nil
+                    name = nil
+                end
+            elseif k ~= "indexes" and not class[k] then
+                rawset(c, k, v)
+            end
+        end,
         __metatable = {},
         __tostring = function(c) return ("class: %s"):format(name) end,
         __call = create
