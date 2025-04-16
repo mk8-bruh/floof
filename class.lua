@@ -1,5 +1,5 @@
 local _PATH = (...):match("(.-)[^%.]+$")
-local inj = {}
+local inj = {} -- dependency injection table
 
 local function _index(indexes, t, k, visited)
     for i, index in ipairs(indexes) do
@@ -122,4 +122,4 @@ return setmetatable({}, {
 	__metatable = {},
     __tostring = function() return "FLOOF class module" end,
     __call = new,
-})
+}), inj
