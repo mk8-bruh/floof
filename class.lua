@@ -1,6 +1,5 @@
 local _PATH = (...):match("(.-)[^%.]+$")
-local array  = require(_PATH .. ".array" )
-local object = require(_PATH .. ".object")
+local inj = {}
 
 local function _index(indexes, t, k, visited)
     for i, index in ipairs(indexes) do
@@ -41,7 +40,7 @@ function class.index(o, ...)
 end
 
 local function create(c, ...)
-    local o = object.new({}, c)
+    local o = inj.object.new({}, c)
     if type(o.init) == "function" then
         o:init(...)
     end
@@ -73,10 +72,10 @@ local function new(_, ...)
     clrefs[c] = c
     supers[c] = super
     local indexes
-    if array.is(c.indexes) then
+    if inj.array.is(c.indexes) then
         indexes = c.indexes
     else
-        indexes = array.new()
+        indexes = inj.array.new()
         if type(c.indexes) == "table" then
             for i, v in ipairs(c.indexes) do
                 indexes:append(v)

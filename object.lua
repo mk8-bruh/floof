@@ -1,6 +1,5 @@
 local _PATH = (...):match("(.-)[^%.]+$")
-local array = require(_PATH..".array")
-local class = require(_PATH..".class")
+local inj = {} -- dependency injection table
 
 -- dummy functions
 local emptyf    = function(...) return end
@@ -186,7 +185,7 @@ local objectFunctions = {
         end
         if object.parent == self then
             internal.childRegister[object] = true
-            internal.objectPresses[object] = internal.objectPresses[k] or array.new()
+            internal.objectPresses[object] = internal.objectPresses[k] or inj.array.new()
         else
             internal.childRegister[object] = nil
             for i, id in ipairs(internal.objectPresses[object]) do
@@ -327,10 +326,10 @@ local objectProperties = {
     -- a list of this component's children sorted from front to back
     children = {
         init = function(self, internal)
-            internal.children = array.new()
+            internal.children = inj.array.new()
         end,
         get = function(self, internal)
-            local children = array.new()
+            local children = inj.array.new()
             for i, e in ipairs(internal.children) do
                 table.insert(children, e)
             end
@@ -483,13 +482,13 @@ local objectProperties = {
             internal.objectPresses = {}
             if self == root then
                 -- root press register
-                internal.objectPresses[self] = array.new()
+                internal.objectPresses[self] = inj.array.new()
             end
             -- proxy table for public access
             internal.objectPressesProxy = setmetatable({}, {
                 __index = function(t, k)
                     if internal.objectPresses[k] then
-                        local t = array.new()
+                        local t = inj.array.new()
                         for i, id in ipairs(internal.objectPresses[k]) do
                             table.insert(t, id)
                         end
@@ -554,7 +553,7 @@ local objectProperties = {
     -- a list of functions/tables to act as the index meta, in order
     indexes = {
         init = function(self, internal)
-            internal.indexes = array.new()
+            internal.indexes = inj.array.new()
         end,
         get = function(self, internal)
             return internal.indexes
@@ -643,7 +642,7 @@ local function newObject(object, index)
                     objectProperties[k] and objectProperties[k].get and objectProperties[k].get(object, internal) or
                     wrappers[k] or
                     methods[k] or
-                    class[k] or
+                    inj.class[k] or
                     _index(internal.indexes, object, k) or
                     type(index) == "function" and index(object, k) or
                     type(index) == "table" and index[k]
@@ -660,7 +659,7 @@ local function newObject(object, index)
                 else
                     error(("Cannot assign non-function value to %q (got: %s (%s))"):format(k, tostring(v), type(v)), 2)
                 end
-            elseif methods[k] or class[k] then
+            elseif methods[k] or inj.class[k] then
                 error(("Cannot override the %q method"):format(tostring(k)), 2)
             elseif objectProperties[k] then
                 if objectProperties[k].set then
@@ -684,7 +683,7 @@ local function newObject(object, index)
             end
         end,
         __metatable = {},
-        __tostring = function(t) return type(object.tostring) == "function" and object:tostring() or type(object.tostring) == "string" and object.tostring or ("%s: %s"):format(class.is(index) and index.name or "object", name) end
+        __tostring = function(t) return type(object.tostring) == "function" and object:tostring() or type(object.tostring) == "string" and object.tostring or ("%s: %s"):format(inj.class.is(index) and index.name or "object", name) end
     })
     -- initialize properties
     for k, v in pairs(objectProperties) do
@@ -715,4 +714,4 @@ return {
     new = newObject,
     root = root,
     checks = checks
-}
+}, inj

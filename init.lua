@@ -1,6 +1,10 @@
 local _PATH = ...
-local object = require(_PATH .. ".object")
-local class  = require(_PATH .. ".class" )
+local object, o_inj = require(_PATH .. ".object")
+local class,  c_inj = require(_PATH .. ".class" )
+local array = require(_PATH .. ".array")
+
+o_inj.class,  o_inj.array = class,  array
+c_inj.object, c_inj.array = object, array
 
 local emptyf, identityf = function(...) return end, function(...) return ... end
 
