@@ -703,7 +703,10 @@ local function newObject(object, index)
 end
 
 return {
-    is = isObject,
-    new = newObject,
-    checks = checks
-}, inj
+    module = {
+        is = isObject,
+        new = newObject,
+        checks = checks
+    },
+    inj = inj
+}

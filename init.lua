@@ -1,13 +1,13 @@
 local _PATH = ...
-local object, o_inj = require(_PATH .. ".object")
-local class,  c_inj = require(_PATH .. ".class" )
-local array = require(_PATH .. ".array")
+local object = require(_PATH .. ".object")
+local class  = require(_PATH .. ".class" )
+local array  = require(_PATH .. ".array" )
 
-o_inj.class,  o_inj.array = class,  array
-c_inj.object, c_inj.array = object, array
+object.inj.class,  object.inj.array = class.module,  array
+class.inj.object,  class.inj.array  = object.module, array
 
-local root = object.new{check = true}
-o_inj.root = root
+local root = object.module.new{check = true}
+object.inj.root = root
 
 local emptyf, identityf = function(...) return end, function(...) return ... end
 
@@ -15,18 +15,18 @@ local presses = {}
 
 local lib = {
     checks = setmetatable({}, {
-        __index = object.checks,
+        __index = object.module.checks,
         __newindex = function(t, k, v)
             if type(v) ~= "function" then
                 error(("Attempted to assign a non-function value to %q (got: %s (%s))"):format(tostring(k), tostring(v), type(v)), 2)
             end
-            object.checks[k] = v
+            object.module.checks[k] = v
         end
     }),
-    is = object.is, isObject = object.is,
-    new = object.new, newObject = object.new,
+    is = object.module.is, isObject = object.module.is,
+    new = object.module.new, newObject = object.module.new,
     root = root,
-    class = class,
+    class = class.module,
     init = function()
         if not love then return end
         local old = {}

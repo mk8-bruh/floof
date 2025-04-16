@@ -91,7 +91,7 @@ local function new(_, ...)
             elseif k == "indexes" then
                 return indexes
             else
-                return _index(indexes, c, k) or super[k] or class[k]
+                return _index(indexes, c, k) or super and super[k] or class[k]
             end
         end,
         __newindex = function(c, k, v)
@@ -116,10 +116,13 @@ local function new(_, ...)
     })
 end
 
-return setmetatable({}, {
-    __index = function(_, k) return class[k] or named[k] end,
-    __newindex = function() end,
-	__metatable = {},
-    __tostring = function() return "FLOOF class module" end,
-    __call = new,
-}), inj
+return {
+    module = setmetatable({}, {
+        __index = function(_, k) return class[k] or named[k] end,
+        __newindex = function() end,
+        __metatable = {},
+        __tostring = function() return "FLOOF class module" end,
+        __call = new,
+    }),
+    inj = inj
+}
