@@ -104,7 +104,7 @@ local function new(_, ...)
                     named[v] = c
                 elseif v == nil then
                     named[name] = nil
-                    name = nil
+                    name = tostring(c):match("table: (.+)") or tostring(c)
                 end
             elseif k ~= "indexes" and not class[k] then
                 rawset(c, k, v)
