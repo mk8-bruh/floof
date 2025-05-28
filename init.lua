@@ -6,8 +6,28 @@ local array  = require(_PATH .. ".array" )
 object.inj.class,  object.inj.array = class.module,  array
 class.inj.object,  class.inj.array  = object.module, array
 
-local root = object.module.new{check = true}
+local root = {check = true}
 object.inj.root = root
+object.module.new(root)
+
+local loveCallbackNames, blockingCallbackNames = {
+    "resize", "update", "draw", "quit",
+
+    "mousepressed", "mousemoved", "mousereleased", "wheelmoved",
+    "touchpressed", "touchmoved", "touchreleased",
+
+    "keypressed", "keyreleased", "textinput",
+    "filedropped", "directorydropped",
+    "joystickadded", "joystickremoved",
+    "joystickaxis", "joystickhat", "joystickpressed", "joystickreleased",
+    "gamepadaxis", "gamepadpressed", "gamepadreleased"
+}, {
+    "keypressed", "keyreleased", "textinput",
+    "filedropped", "directorydropped",
+    "joystickadded", "joystickremoved",
+    "joystickaxis", "joystickhat", "joystickpressed", "joystickreleased",
+    "gamepadaxis", "gamepadpressed", "gamepadreleased"
+}
 
 local emptyf, identityf = function(...) return end, function(...) return ... end
 
@@ -35,20 +55,21 @@ local lib = {
         end
         for _, f in ipairs(blockingCallbackNames) do
             love[f] = function(...)
-                return root[f](...) or old[f](...)
+                return root[f](root, ...) or old[f](...)
             end
         end
         for _, f in ipairs{"resize", "update", "draw", "quit"} do
             love[f] = function(...)
                 old[f](...)
-                root[f](...)
+                root[f](root, ...)
             end
         end
         love.mousepressed = function(...)
             local x, y, b, t = ...
-            if root.check(x, y) and b and not t then
+            if b and not t then root:keypressed(("mouse%d"):format(b)) end
+            if root:check(x, y) and b and not t then
                 presses[b] = true
-                return root.pressed(x, y, b) or old.mousepressed(...)
+                return root:pressed(x, y, b) or old.mousepressed(...)
             end
         end
         love.mousemoved = function(...)
@@ -57,7 +78,7 @@ local lib = {
                 local r = false
                 for b in pairs(presses) do
                     if type(b) == "number" then
-                        if root.moved(x, y, dx, dy, b) then
+                        if root:moved(x, y, dx, dy, b) then
                             r = true
                         else
                             presses[b] = nil
@@ -69,18 +90,19 @@ local lib = {
         end
         love.mousereleased = function(...)
             local x, y, b, t = ...
+            if b and not t then root:keyreleased(("mouse%d"):format(b)) end
             if b and not t and presses[b] then
                 presses[b] = nil
-                return root.released(x, y, b) or old.mousereleased(...)
+                return root:released(x, y, b) or old.mousereleased(...)
             end
         end
         love.wheelmoved = function(...)
             local x, y = ...
-            return root.check(love.mouse.getPosition()) and root.scrolled(y) or old.wheelmoved(...)
+            return root:check(love.mouse.getPosition()) and root:scrolled(y) or old.wheelmoved(...)
         end
         love.touchpressed = function(...)
             local id, x, y = ...
-            if root.check(x, y) and root.pressed(x, y, id) then
+            if root:check(x, y) and root:pressed(x, y, id) then
                 presses[id] = true
             else
                 return old.touchpressed(...)
@@ -88,14 +110,14 @@ local lib = {
         end
         love.touchmoved = function(...)
             local id, x, y, dx, dy = ...
-            if presses[id] and not root.moved(x, y, dx, dy, id) then
+            if presses[id] and not root:moved(x, y, dx, dy, id) then
                 presses[id] = nil
                 return old.touchmoved(...)
             end
         end
         love.touchreleased = function(...)
             local id, x, y = ...
-            if presses[id] and root.released(x, y, id) then
+            if presses[id] and root:released(x, y, id) then
                 presses[id] = nil
             else
                 return old.touchreleased(...)

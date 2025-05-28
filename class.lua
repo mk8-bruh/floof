@@ -1,6 +1,10 @@
 local _PATH = (...):match("(.-)[^%.]+$")
 local inj = {} -- dependency injection table
 
+-- dummy functions
+local emptyf = function(...) return end
+local setk      = function(t, k, v) t[k] = v end
+
 local function _index(indexes, t, k, visited)
     for i, index in ipairs(indexes) do
         local v
@@ -15,50 +19,107 @@ local function _index(indexes, t, k, visited)
 end
 
 local class  = {}
-local named  = setmetatable({}, {__mode = "v"}) -- { name : class }
-local clrefs = setmetatable({}, {__mode = "k"}) -- { class: self  | object: class }
-local supers = setmetatable({}, {__mode = "k"}) -- { class: super | object: super }
+local classes = setmetatable({}, {__mode = "k"})
+local named   = setmetatable({}, {__mode = "v"})
 
 function class.is(o, c)
-    return o and c and (clrefs[o] == c or class.is(class.super(o), c)) or o and clrefs[o] == o
-end
-
-function class.class(o)
-    return o and clrefs[o]
-end
-
-function class.super(o)
-    return o and supers[o]
+    return  inj.object.is(o) and class.is(c) and (o.class == c or class.is(o.class.super, c)) or
+            o and classes[o] ~= nil
 end
 
 function class.index(o, ...)
-    if o and clrefs[o] then
+    if inj.object.is(o) or class.is(o) then
         for k, i in ipairs{...} do
             o.indexes:push(i, k)
         end
     end
 end
 
-local function create(c, ...)
-    local o = inj.object.new({}, c)
-    if type(o.init) == "function" then
-        o:init(...)
+local classMt = {
+    __index = function(c, k)
+        local ref = c and classes[c]
+        if not ref then return end
+        return  k == "name" and ref.name or
+                k == "super" and ref.super or
+                k == "check" and ref.check or
+                k == "indexes" and ref.indexes or
+                ref.callbacks[k] or
+                _index(ref.indexes, c, k) or
+                ref.super and ref.super[k] or
+                class[k]
+    end,
+    __newindex = function(c, k, v)
+        local ref = c and classes[c]
+        if not ref then return end
+        if k == "name" then
+            if type(v) == "string" then
+                if named[v] then
+                    error(("A class named %q already exists"):format(v), 2)
+                end
+                if named[ref.name] then named[name] = nil end
+                ref.name = v
+                named[v] = c
+            elseif v == nil then
+                named[ref.name] = nil
+                ref.name = tostring(c):match("table: (.+)") or tostring(c)
+            else
+                error(("Invalid value for class name (got: %s (%s))"):format(tostring(v), type(v)), 2)
+            end
+        elseif k == "check" then
+            if v == nil then
+                ref.check = nil
+            elseif type(v) == "boolean" then
+                ref.check = function() return v end
+            elseif type(v) == "function" then
+                ref.check = v
+            else
+                error(("Cannot assign non-function value to %q (got: %s (%s))"):format(k, tostring(v), type(v)), 2)
+            end
+        elseif k == "indexes" then
+            if type(v) == "table" then
+                c:index(unpack(v))
+            else
+                error(("%q must be assigned an array of index tables (got: %s (%s))"):format(k, tostring(v), type(v)), 2)
+            end
+        elseif inj.object.callbackNames[k] then
+            if v == nil then
+                ref.callbacks[k] = nil
+            elseif type(v) == "boolean" then
+                ref.callbacks[k] = function() return v end
+            elseif type(v) == "function" then
+                ref.callbacks[k] = v
+            else
+                error(("Cannot assign non-function value to %q (got: %s (%s))"):format(k, tostring(v), type(v)), 2)
+            end
+        elseif class[k] then
+            error(("Cannot override the %q method"):format(tostring(k)), 2)
+        else
+            rawset(c, k, v)
+        end
+    end,
+    __metatable = {},
+    __tostring = function(c)
+        local ref = c and classes[c]
+        if not ref then return end
+        return ("class: %s"):format(ref.name)
+    end,
+    __call = function(c, ...)
+        return inj.object.new({}, c, ...)
     end
-    return o
-end
+}
 
-local function new(_, ...)
-    local arg = {...}
-    if arg[1] and type(arg[1]) ~= "string" then
-        table.insert(arg, 1, nil)
+local function new(_, name, super, c)
+    if name and type(name) ~= "string" then
+        super, c, name = name, super
     end
-    if arg[2] and clrefs[arg[2]] ~= arg[2] then
-        table.insert(arg, 2, nil)
+    if super and not class.is(super) then
+        c, super = super
     end
-    if type(arg[3]) ~= "table" or getmetatable(arg[3]) then
-        table.insert(arg, 3, {})
+    c = type(c) == "table" and c or {}
+    if not pcall(setmetatable, c, nil) then
+        error("Classes with custom metatables are not supported. If you want to implement an indexing metatable/metamethod, use the 'indexes' field", 2)
     end
-    local name, super, c = arg[1], arg[2], arg[3]
+    name = name or tostring(c):match("table: (.+)") or tostring(c)
     if name then
         if named[name] then
             error(("A class named %q already exists"):format(name), 2)
@@ -68,52 +129,22 @@ local function new(_, ...)
             named[name] = c
         end
     end
-    name = name or tostring(c):match("table: (.+)") or tostring(c)
-    clrefs[c] = c
-    supers[c] = super
-    local indexes
-    if inj.array.is(c.indexes) then
-        indexes = c.indexes
-    else
-        indexes = inj.array.new()
-        if type(c.indexes) == "table" then
-            for i, v in ipairs(c.indexes) do
-                indexes:append(v)
-            end
-        end
+    local ref = {
+        name = name,
+        super = super,
+        check = nil,
+        indexes = inj.array.new(),
+        callbacks = {}
+    }
+    classes[c] = ref
+    local data = {}
+    for k, v in pairs(c) do data[k], c[k] = v end
+    setmetatable(c, classMt)
+    for k, v in pairs(data) do
+        local s, e = pcall(setk, c, k, v)
+        if not s then error(e, 2) end
     end
-    c.name = nil
-    c.indexes = nil
-    return setmetatable(c, {
-        __index = function(c, k)
-            if k == "name" then
-                return name
-            elseif k == "indexes" then
-                return indexes
-            else
-                return _index(indexes, c, k) or super and super[k] or class[k]
-            end
-        end,
-        __newindex = function(c, k, v)
-            if k == "name" then
-                if type(v) == "string" then
-                    if named[v] then
-                        error(("A class named %q already exists"):format(v), 2)
-                    end
-                    name = v
-                    named[v] = c
-                elseif v == nil then
-                    named[name] = nil
-                    name = tostring(c):match("table: (.+)") or tostring(c)
-                end
-            elseif k ~= "indexes" and not class[k] then
-                rawset(c, k, v)
-            end
-        end,
-        __metatable = {},
-        __tostring = function(c) return ("class: %s"):format(name) end,
-        __call = create
-    })
+    return c
 end
 
 return {
