@@ -111,40 +111,43 @@ local objectCallbacks = {
     pressed = function(self, x, y, id)
         local internal = objects[self].internal
         local t = self.children
-        if self == inj.root then
-            -- track all presses in root
-            table.insert(internal.objectPresses[self], id)
-        end
+        internal.presses:append(id)
         for i, e in ipairs(t) do
             if e.isEnabled and e:check(x, y) and e:pressed(x, y, id) ~= false then
-                self:setPressTarget(id, e)
+                internal.pressedObject[id] = e
                 return true
             end
         end
     end,
     moved = function(self, x, y, dx, dy, id)
-        if self.pressedObject[id] then
-            if self.pressedObject[id]:moved(x, y, dx, dy, id) ~= true and not self.pressedObject[id]:check(x, y) then
+        local internal = objects[self].internal
+        if internal.pressedObject[id] then
+            if internal.pressedObject[id]:moved(x, y, dx, dy, id) ~= true and not self.pressedObject[id]:check(x, y) then
                 -- object should no longer be pressed
-                self.pressedObject[id]:cancelled(id)
-                self:setPressTarget(id)
+                self:cancelled(id)
             end
             return true
         end
     end,
     released = function(self, x, y, id)
         local internal = objects[self].internal
-        if self == inj.root then
-            internal.objectPresses[self]:remove(id)
-        end
-        if self.pressedObject[id] then
-            self.pressedObject[id]:released(x, y, id)
-            self:setPressTarget(id)
+        internal.presses:remove(id)
+        if internal.pressedObject[id] then
+            internal.pressedObject[id]:released(x, y, id)
+            internal.pressedObject[id] = nil
             return true
         end
     end,
+    cancelled = function(self, id)
+        local internal = objects[self].internal
+        internal.presses:remove(id)
+        if internal.pressedObject[id] then
+            internal.pressedObject[id]:cancelled(x, y, id)
+            internal.pressedObject[id] = nil
+        end
+    end,
     scrolled = function(self, t)
-        if self.hoveredChild then
+        if self.isHovered and self.hoveredChild then
             self.hoveredChild:scrolled(t)
             return true
         end
@@ -191,13 +194,11 @@ local objectFunctions = {
         local internal = objects[self].internal
         if object.parent == self then
             internal.childRegister[object] = true
-            internal.objectPresses[object] = internal.objectPresses[k] or inj.array.new()
         else
             internal.childRegister[object] = nil
-            for i, id in ipairs(internal.objectPresses[object]) do
+            for i, id in ipairs(object.presses) do
                 internal.pressedObject[id] = nil
             end
-            internal.objectPresses[object] = nil
         end
         self:refreshChildren()
     end,
@@ -234,23 +235,14 @@ local objectFunctions = {
         local p = internal.pressedObject[id]
         if p == object then return end
         if p then
-            for i, o in ipairs(internal.objectPresses[p]) do
-                if o == id then
-                    table.remove(internal.objectPresses[p], i)
-                    break
-                end
-            end
             p:cancelled(id)
-            p:setPressTarget(id)
         end
         local x, y = getPressPosition(id)
         if object and object:pressed(x, y, id) then
-            table.insert(internal.objectPresses[object], id)
-        elseif self == inj.root and not p then
-            internal.objectPresses[self]:remove(id)
-            self:cancelled(id)
+            internal.pressedObject[id] = object
+        else
+            internal.pressedObject[id] = nil
         end
-        internal.pressedObject[id] = object
     end,
     -- get the position of the i-th press on this element, or the most recent press if unspecified
     getPressPosition = function(self, i)
@@ -311,15 +303,15 @@ local objectProperties = {
                 p:updateChildStatus(self)
                 p:removed(self)
                 self:removedfrom(p)
-            else
-                self:created()
+          --else
+          --    self:created()
             end
             if value then
                 self.parent:updateChildStatus(self)
                 self.parent:added(self)
                 self:addedto(self.parent)
-            else
-                self:deleted()
+          --else
+          --    self:deleted()
             end
         end
     },
@@ -479,6 +471,7 @@ local objectProperties = {
     -- the (top-most) child of this object which is currently hovered by the mouse
     hoveredChild = {
         get = function(self)
+            if not self.isHovered then return end
             if love and love.mouse then
                 local x, y = love.mouse.getPosition()
                 for i, e in ipairs(self.children) do
@@ -492,49 +485,8 @@ local objectProperties = {
     -- whether this object is currently hovered by the mouse
     isHovered = {
         get = function(self)
-            return self.parent.hoveredChild == self
-        end
-    },
-    -- the lists of the IDs of all presses currently interacting with this object's children, which are the keys of the table
-    objectPresses = {
-        init = function(self)
-            local internal = objects[self].internal
-            internal.objectPresses = {}
-            if self == inj.root then
-                -- root press register
-                internal.objectPresses[self] = inj.array.new()
-            end
-            -- proxy table for public access
-            internal.objectPressesProxy = setmetatable({}, {
-                __index = function(t, k)
-                    if internal.objectPresses[k] then
-                        local t = inj.array.new()
-                        for i, id in ipairs(internal.objectPresses[k]) do
-                            t:append(id)
-                        end
-                        return t
-                    end
-                end, __newindex = emptyf
-            })
-        end,
-        get = function(self)
-            local internal = objects[self].internal
-            return internal.objectPressesProxy
-        end
-    },
-    -- the IDs of the most recent presses on this object's children (again, entry per child)
-    objectPress = {
-        init = function(self)
-            local internal = objects[self].internal
-            internal.objectPressProxy = setmetatable({}, {
-                __index = function(t, k)
-                    return self.objectPresses[k] and self.objectPresses[k][-1] or nil
-                end, __newindex = __emptyf
-            })
-        end,
-        get = function(self)
-            local internal = objects[self].internal
-            return internal.objectPressProxy
+            if self == inj.root then return self:check(love.mouse.getPosition()) end
+            return self.parent.isHovered and self.parent.hoveredChild == self
         end
     },
     -- a press register storing which object a press is currently interacting with
@@ -565,14 +517,31 @@ local objectProperties = {
     },
     -- the list of the IDs of all presses currently interacting with this object
     presses = {
+        init = function(self)
+            local internal = objects[self].internal
+            internal.presses = inj.array.new()
+        end,
         get = function(self)
-            return self.parent.objectPresses[self]
+            local internal = objects[self].internal
+            local p = inj.array.new()
+            for i, id in ipairs(internal.presses) do
+                p:append(id)
+            end
+            return p
         end
     },
     -- the ID of the most recent press interacting with this object
+    press = {
+        get = function(self)
+            local internal = objects[self].internal
+            return internal.presses[-1]
+        end
+    },
+    -- whether the object is currently pressed
     isPressed = {
         get = function(self)
-            return #self.presses > 0
+            local internal = objects[self].internal
+            return #internal.presses > 0
         end
     },
     -- a list of functions/tables to act as the index meta, in order
@@ -712,13 +681,13 @@ local function newObject(object, class, ...)
             if not s then error(e, 2) end
         end
     end
+    -- initialize parent
+    local s, e = pcall(setk, object, "parent", data.parent or inj.root)
+    if not s then error(e, 2) end
     -- call constructor
     if type(object.init) == "function" then
         object:init(...)
     end
-    -- initialize parent
-    local s, e = pcall(setk, object, "parent", data.parent or inj.root)
-    if not s then error(e, 2) end
     -- initialize screen dimensions
     if love and love.graphics then
         object:resize(love.graphics.getDimensions())

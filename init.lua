@@ -6,7 +6,7 @@ local array  = require(_PATH .. ".array" )
 object.inj.class,  object.inj.array = class.module,  array
 class.inj.object,  class.inj.array  = object.module, array
 
-local root = {check = true}
+local root = {check = true, tostring = "<root>"}
 object.inj.root = root
 object.module.new(root)
 
