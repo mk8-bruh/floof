@@ -38,12 +38,12 @@ end
 
 -- callback list
 local callbackNames, activeCallbackNames = {
-    "resize", "update", "draw", "quit",
+    "resize", "update", "draw", "latedraw", "quit",
 
     "pressed", "moved", "released", "cancelled",
     "scrolled", "hovered", "unhovered",
 
-    "keypressed", "keyreleased", "textinput",
+    "mousedelta", "keypressed", "keyreleased", "textinput",
     "filedropped", "directorydropped",
     "joystickadded", "joystickremoved",
     "joystickaxis", "joystickhat", "joystickpressed", "joystickreleased",
@@ -53,7 +53,7 @@ local callbackNames, activeCallbackNames = {
     "activated", "deactivated", "childactivated", "childdeactivated",
     "enabled", "disabled",
 }, {
-    "keypressed", "keyreleased", "textinput",
+    "mousedelta", "keypressed", "keyreleased", "textinput",
     "filedropped", "directorydropped",
     "joystickadded", "joystickremoved",
     "joystickaxis", "joystickhat", "joystickpressed", "joystickreleased",
@@ -174,13 +174,15 @@ for i, n in ipairs(callbackNames) do
         if not isObject(self) then error(("Function %q must be called on an object (got: %s (%s))"):format(n, tostring(self), type(self))) end
         -- custom 'draw' callback that restores the state for neater graphics code
         local r = false
-        local f = objects[self].callbacks[n] or (self.class and self.class[n])
+        local draw = objects[self].callbacks.draw or (self.class and self.class.draw)
         if love and love.graphics then love.graphics.push("all") end
-        if f and f(self, ...) == false then r = true end
+        if draw and draw(self, ...) == false then r = true end
         if r then love.graphics.pop() return false end
         old(self, ...)
+        local late = objects[self].callbacks.latedraw or (self.class and self.class.latedraw)
+        if late then late(self, ...) end
         if love and love.graphics then love.graphics.pop() end
-    end or function(self, ...)
+    end or n ~= "latedraw" and function(self, ...)
         if not isObject(self) then error(("Function %q must be called on an object (got: %s (%s))"):format(n, tostring(self), type(self))) end
         local f = objects[self].callbacks[n] or (self.class and self.class[n])
         return (not f or f(self, ...) ~= false) and old(self, ...)
@@ -303,15 +305,11 @@ local objectProperties = {
                 p:updateChildStatus(self)
                 p:removed(self)
                 self:removedfrom(p)
-          --else
-          --    self:created()
             end
             if value then
                 self.parent:updateChildStatus(self)
                 self.parent:added(self)
                 self:addedto(self.parent)
-          --else
-          --    self:deleted()
             end
         end
     },

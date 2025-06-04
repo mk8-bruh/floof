@@ -74,6 +74,9 @@ local lib = {
         end
         love.mousemoved = function(...)
             local x, y, dx, dy, t = ...
+            if love.mouse.getRelativeMode() then
+                root:mousedelta(dx, dy)
+            end
             if not t then
                 local r = false
                 for b in pairs(presses) do
