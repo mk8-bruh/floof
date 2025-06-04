@@ -585,6 +585,15 @@ local checks = {
             return false
         end
         return (x - self.x)^2 / (self.w/2)^2 + (y - self.y)^2 / (self.h)/2^2 <= 1
+    end,
+    -- union of all child checks
+    children = function(self, x, y)
+        for i, child in ipairs(self.children) do
+            if child:check(x, y) then
+                return true
+            end
+        end
+        return false
     end
 }
 checks.default = checks.cornerRect

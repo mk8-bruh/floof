@@ -37,10 +37,16 @@ local lib = {
     checks = setmetatable({}, {
         __index = object.module.checks,
         __newindex = function(t, k, v)
-            if type(v) ~= "function" then
-                error(("Attempted to assign a non-function value to %q (got: %s (%s))"):format(tostring(k), tostring(v), type(v)), 2)
+            if v == nil then
+                object.module.checks = nil
+            elseif type(v) == "boolean" then
+                -- a shorthand for an infinite/non-existent hitbox
+                object.module.checks = function() return v end
+            elseif type(v) == "function" then
+                object.module.checks = v
+            else
+                error(("Cannot add non-function value to checks (%q) (got: %s (%s))"):format(tostring(k), tostring(v), type(v)), 2)
             end
-            object.module.checks[k] = v
         end
     }),
     is = object.module.is, isObject = object.module.is,
