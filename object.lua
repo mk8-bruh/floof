@@ -98,13 +98,9 @@ local objectCallbacks = {
         for i = #t, 1, -1 do
             local e = t[i]
             if e.isEnabled then
-                if love and love.graphics then
-                    love.graphics.push("all")
-                end
+                love.graphics.push("all")
                 e:draw()
-                if love and love.graphics then
-                    love.graphics.pop()
-                end
+                love.graphics.pop()
             end
         end
     end,
@@ -173,15 +169,17 @@ for i, n in ipairs(callbackNames) do
     objectCallbacks[n] = n == "draw" and function(self, ...)
         if not isObject(self) then error(("Function %q must be called on an object (got: %s (%s))"):format(n, tostring(self), type(self))) end
         -- custom 'draw' callback that restores the state for neater graphics code
-        local r = false
         local draw = objects[self].callbacks.draw or (self.class and self.class.draw)
-        if love and love.graphics then love.graphics.push("all") end
-        if draw and draw(self, ...) == false then r = true end
-        if r then love.graphics.pop() return false end
+        love.graphics.push("all")
+        if draw then
+            draw(self, ...)
+        end
         old(self, ...)
         local late = objects[self].callbacks.latedraw or (self.class and self.class.latedraw)
-        if late then late(self, ...) end
-        if love and love.graphics then love.graphics.pop() end
+        if late then
+            late(self, ...)
+        end
+        love.graphics.pop()
     end or n ~= "latedraw" and function(self, ...)
         if not isObject(self) then error(("Function %q must be called on an object (got: %s (%s))"):format(n, tostring(self), type(self))) end
         local f = objects[self].callbacks[n] or (self.class and self.class[n])
@@ -445,7 +443,6 @@ local objectProperties = {
             end
             internal.active = value
             if value then
-                value.parent = self
                 value:activated()
                 self:childactivated(value)
             end
