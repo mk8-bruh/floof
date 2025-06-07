@@ -120,7 +120,7 @@ local objectCallbacks = {
         if internal.pressedObject[id] then
             if internal.pressedObject[id]:moved(x, y, dx, dy, id) ~= true and not self.pressedObject[id]:check(x, y) then
                 -- object should no longer be pressed
-                self:cancelled(id)
+                self:setPressTarget(id)
             end
             return true
         end
@@ -162,7 +162,6 @@ for i, n in ipairs(activeCallbackNames) do
     end
 end
 
--- remaining empty callbacks
 for i, n in ipairs(callbackNames) do
     callbackNames[n] = i
     local old = objectCallbacks[n] or emptyf
@@ -183,7 +182,13 @@ for i, n in ipairs(callbackNames) do
     end or n ~= "latedraw" and function(self, ...)
         if not isObject(self) then error(("Function %q must be called on an object (got: %s (%s))"):format(n, tostring(self), type(self))) end
         local f = objects[self].callbacks[n] or (self.class and self.class[n])
-        return (not f or f(self, ...) ~= false) and old(self, ...)
+        local v = f and f(self, ...)
+        if n == "moved" then
+            local r = old(self, ...)
+            return v or r
+        else
+            return (v ~= false) and old(self, ...)
+        end
     end
 end
 
