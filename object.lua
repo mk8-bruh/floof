@@ -1,5 +1,5 @@
 local _PATH = (...):match("(.-)[^%.]+$")
-local inj = {} -- dependency injection table
+local module, inj = {}, {} -- dependency injection table
 
 -- dummy functions
 local emptyf    = function(...) return end
@@ -23,22 +23,18 @@ end
 -- generalized position grabber (touch/mouse)
 local function getPressPosition(id)
     if type(id) == "number" then
-        if love and love.mouse then
-            return love.mouse.getPosition()
-        end
+        return love.mouse.getPosition()
     else
-        if love and love.touch then
-            local s, x, y = pcall(love.touch.getPosition, id)
-            if s then
-                return x, y
-            end
+        local s, x, y = pcall(love.touch.getPosition, id)
+        if s then
+            return x, y
         end
     end
 end
 
 -- callback list
-local callbackNames, activeCallbackNames = {
-    "resize", "update", "draw", "latedraw", "quit",
+module.callbackNames, module.activeCallbackNames = {
+    "resize", "update", "predraw", "draw", "postdraw", "quit",
 
     "pressed", "moved", "released", "cancelled",
     "scrolled", "hovered", "unhovered",
@@ -62,7 +58,24 @@ local callbackNames, activeCallbackNames = {
 
 -- object identification
 local objects = setmetatable({}, {__mode = "k"})
-local function isObject(value) return value and objects[value] ~= nil end
+function module.is(value) return value and objects[value] ~= nil end
+
+function module.setRoot(obj)
+    if obj ~= nil and not module.is(obj) then
+        error(("Invalid object (got: %s (%s))"):format(tostring(obj), type(obj)), 2)
+    end
+    if module.root then
+        -- cancel all presses
+        for i, p in ipairs(module.root.presses) do
+            module.root:cancelled(p)
+        end
+        module.root:deactivated()
+    end
+    module.root = obj
+    if obj then
+        obj:activated()
+    end
+end
 
 -- unique object callbacks
 local objectCallbacks = {
@@ -94,19 +107,44 @@ local objectCallbacks = {
         end
     end,
     draw = function(self)
-        local t = self.children
+        if not module.is(self) then error(("Function %q must be called on an object (got: %s (%s))"):format(n, tostring(self), type(self)), 2) end
+        -- custom 'draw' callback that restores the state for neater graphics code
+        local pre, draw, post =
+            objects[self].callbacks.predraw  or (self.class and self.class.predraw ),
+            objects[self].callbacks.draw     or (self.class and self.class.draw    ),
+            objects[self].callbacks.postdraw or (self.class and self.class.postdraw)
+        love.graphics.push("all")
+        if pre then
+            pre(self)
+        end
+        local drawn = false
+        local internal = objects[self].internal
+        local t = internal.children
         for i = #t, 1, -1 do
             local e = t[i]
+            if e.z >= 0 and not drawn then
+                if not drawn and draw then
+                    draw(self)
+                end
+                drawn = true
+            end
             if e.isEnabled then
                 love.graphics.push("all")
                 e:draw()
                 love.graphics.pop()
             end
         end
+        if not drawn and draw then
+            draw(self)
+        end
+        if post then
+            post(self)
+        end
+        love.graphics.pop()
     end,
     pressed = function(self, x, y, id)
         local internal = objects[self].internal
-        local t = self.children
+        local t = internal.children
         internal.presses:append(id)
         for i, e in ipairs(t) do
             if e.isEnabled and e:check(x, y) and e:pressed(x, y, id) ~= false then
@@ -151,7 +189,8 @@ local objectCallbacks = {
 }
 
 -- default callbacks called on the active element
-for i, n in ipairs(activeCallbackNames) do
+for i, n in ipairs(module.activeCallbackNames) do
+    module.activeCallbackNames[n] = i
     objectCallbacks[n] = objectCallbacks[n] or function(self, ...)
         local internal = objects[self].internal
         if internal.active and internal.active.isEnabled then
@@ -162,32 +201,23 @@ for i, n in ipairs(activeCallbackNames) do
     end
 end
 
-for i, n in ipairs(callbackNames) do
-    callbackNames[n] = i
-    local old = objectCallbacks[n] or emptyf
-    objectCallbacks[n] = n == "draw" and function(self, ...)
-        if not isObject(self) then error(("Function %q must be called on an object (got: %s (%s))"):format(n, tostring(self), type(self))) end
-        -- custom 'draw' callback that restores the state for neater graphics code
-        local draw = objects[self].callbacks.draw or (self.class and self.class.draw)
-        love.graphics.push("all")
-        if draw then
-            draw(self, ...)
-        end
-        old(self, ...)
-        local late = objects[self].callbacks.latedraw or (self.class and self.class.latedraw)
-        if late then
-            late(self, ...)
-        end
-        love.graphics.pop()
-    end or n ~= "latedraw" and function(self, ...)
-        if not isObject(self) then error(("Function %q must be called on an object (got: %s (%s))"):format(n, tostring(self), type(self))) end
-        local f = objects[self].callbacks[n] or (self.class and self.class[n])
-        local v = f and f(self, ...)
-        if n == "moved" then
-            local r = old(self, ...)
-            return v or r
-        else
-            return (v ~= false) and old(self, ...)
+for i, n in ipairs(module.callbackNames) do
+    module.callbackNames[n] = i
+    if n ~= "draw" then
+        local old = objectCallbacks[n] or emptyf
+        objectCallbacks[n] = function(self, ...)
+            if not module.is(self) then error(("Function %q must be called on an object (got: %s (%s))"):format(n, tostring(self), type(self)), 2) end
+            local f = objects[self].callbacks[n] or (self.class and self.class[n])
+            local v = f and f(self, ...)
+            if n == "moved" then
+                local r = old(self, ...)
+                return v or r
+            elseif n == "pressed" or n == "released" or module.activeCallbackNames[n] then
+                return (v ~= false) and old(self, ...)
+            else
+                old(self, ...)
+                return v
+            end
         end
     end
 end
@@ -196,6 +226,9 @@ end
 local objectFunctions = {
     -- update the status of the object in this object's register (used internally)
     updateChildStatus = function(self, object)
+        if not module.is(object) then
+            error(("Invalid object (got: %s (%s))"):format(tostring(object), type(object)), 3)
+        end
         local internal = objects[self].internal
         if object.parent == self then
             internal.childRegister[object] = true
@@ -218,19 +251,19 @@ local objectFunctions = {
     end,
     -- traverse the hierarchy upwards and check for object
     isChildOf = function(self, object)
-        local e = self
-        while e ~= inj.root do
+        if not module.is(object) then
+            error(("Invalid object (got: %s (%s))"):format(tostring(object), type(object)), 3)
+        end
+        local e = self.parent
+        while e do
+            if e == object then return true end
             e = e.parent
-            if not e then break end
-            if e == object then
-                return true
-            end
         end
         return false
     end,
     -- change which element is interacting with a press
     setPressTarget = function(self, id, object)
-        if object ~= nil and not isObject(object) then
+        if object ~= nil and not module.is(object) then
             error(("Invalid object (got: %s (%s))"):format(tostring(object), type(object)), 3)
         end
         if object ~= nil and object.parent ~= self then
@@ -243,7 +276,7 @@ local objectFunctions = {
             p:cancelled(id)
         end
         local x, y = getPressPosition(id)
-        if object and object:pressed(x, y, id) then
+        if object and object:pressed(x, y, id) ~= false then
             internal.pressedObject[id] = object
         else
             internal.pressedObject[id] = nil
@@ -263,7 +296,7 @@ local objectFunctions = {
 
 for k, f in pairs(objectFunctions) do
     objectFunctions[k] = function(self, ...)
-        if not isObject(self) then error(("Function %q must be called on an object (got: %s (%s))"):format(n, tostring(self), type(self))) end
+        if not module.is(self) then error(("Function %q must be called on an object (got: %s (%s))"):format(n, tostring(self), type(self))) end
         return f(self, ...)
     end
 end
@@ -274,17 +307,12 @@ local objectProperties = {
     parent = {
         get = function(self)
             local internal = objects[self].internal
-            if self == inj.root then
-                -- root is its own parent
-                return self
-            end
             return internal.parent
         end,
         set = function(self, value)
             local internal = objects[self].internal
-            if self == inj.root then return end
-            if self.parent == value then return end
-            if value ~= nil and not isObject(value) then
+            if internal.parent == value then return end
+            if value ~= nil and not module.is(value) then
                 error(("Parent must be an object (got: %s (%s))"):format(tostring(value), type(value)), 3)
             end
             if self == value then
@@ -294,15 +322,20 @@ local objectProperties = {
                 error(("Cannot assign object as the parent of its current parent"), 3)
             end
             -- deactivate in all parent objects
-            local e = self
-            while e ~= inj.root do
-                e = e.parent
-                if not e or (value and value:isChildOf(e)) then break end
+            local e = internal.parent
+            while e do
+                if value and value:isChildOf(e) then break end
                 if e.activeChild == self then
                     e.activeChild = nil
                 end
+                e = e.parent
             end
-            local p = self.parent
+            -- cancel all presses
+            for i, p in ipairs(self.presses) do
+                self:cancelled(p)
+                self.parent:setPressTarget(p)
+            end
+            local p = internal.parent
             internal.parent = value
             if p then
                 p:updateChildStatus(self)
@@ -310,9 +343,9 @@ local objectProperties = {
                 self:removedfrom(p)
             end
             if value then
-                self.parent:updateChildStatus(self)
-                self.parent:added(self)
-                self:addedto(self.parent)
+                value:updateChildStatus(self)
+                value:added(self)
+                self:addedto(value)
             end
         end
     },
@@ -343,7 +376,7 @@ local objectProperties = {
                 error(("Value must be a table of objects (got:  %s (%s))"):format(tostring(value), type(value)), 3)
             end
             for i, v in ipairs(value) do
-                if not isObject(v) then
+                if not module.is(v) then
                     error(("Non-object value at index %d: %s (%s)"):format(i, tostring(v), type(v)), 3)
                 end
                 if self.isChildOf(v) then
@@ -412,18 +445,6 @@ local objectProperties = {
             return true
         end
     },
-    -- the global enabled state of the object
-    isEnabled = {
-        get = function(self)
-            local internal = objects[self].internal
-            if not internal.enabled then
-                return false
-            elseif internal.parent then
-                return internal.parent.isEnabled
-            end
-            return true
-        end
-    },
     -- the currently active child of this object (dosn't have to be a direct child)
     activeChild = {
         get = function(self)
@@ -433,21 +454,19 @@ local objectProperties = {
         set = function(self, value)
             local internal = objects[self].internal
             if internal.active == value then return end
-            if not isObject(value) and value ~= nil then
+            if not module.is(value) and value ~= nil then
                 error(("Active child must be an object (got: %s (%s))"):format(tostring(value), type(value)), 3)
             end
             if value ~= nil and not value:isChildOf(self) then
                 error(("Active child must be a child of the object"), 3)
             end
-            if value == inj.root then
-                error(("Cannot set root as the active child"), 3)
-            end
-            if self.activeChild then
+            local inRoot = module.root and (self == module.root or self:isChildOf(module.root))
+            if inRoot and internal.active then
                 internal.active:deactivated()
                 self:childdeactivated(internal.active)
             end
             internal.active = value
-            if value then
+            if inRoot and value then
                 value:activated()
                 self:childactivated(value)
             end
@@ -456,14 +475,14 @@ local objectProperties = {
     -- whether this object is active in one of it's ancestors
     isActive = {
         get = function(self)
-            local e = self
-            while e ~= inj.root do
-                e = e.parent
-                if not e then break end
-                if not e then break end
+            if self == module.root then return true end
+            local e = self.parent
+            while e do
                 if e.activeChild == self then
                     return true
                 end
+                if e == module.root then break end
+                e = e.parent
             end
             return false
         end
@@ -472,12 +491,10 @@ local objectProperties = {
     hoveredChild = {
         get = function(self)
             if not self.isHovered then return end
-            if love and love.mouse then
-                local x, y = love.mouse.getPosition()
-                for i, e in ipairs(self.children) do
-                    if e.isEnabled and e:check(x, y) then
-                        return e
-                    end
+            local x, y = love.mouse.getPosition()
+            for i, e in ipairs(self.children) do
+                if e.isEnabled and e:check(x, y) then
+                    return e
                 end
             end
         end
@@ -485,8 +502,10 @@ local objectProperties = {
     -- whether this object is currently hovered by the mouse
     isHovered = {
         get = function(self)
-            if self == inj.root then return self:check(love.mouse.getPosition()) end
-            return self.parent.isHovered and self.parent.hoveredChild == self
+            if self == module.root then
+                return self:check(love.mouse.getPosition())
+            end
+            return self.parent and self.parent.isHovered and self.parent.hoveredChild == self or false
         end
     },
     -- a press register storing which object a press is currently interacting with
@@ -498,10 +517,10 @@ local objectProperties = {
             internal.pressedObjectProxy = setmetatable({}, {
                 __index = internal.pressedObject, __newindex = function(t, k, v)
                     if not getPressPosition(k) then
-                        error(("Invalid press ID: %s (%s)"):format(tostring(k), type(k)), 2)
+                        error(("Invalid press ID: %s (%s)"):format(tostring(k), type(k)), 3)
                     end
-                    if v ~= nil and not isObject(v) then
-                        error(("Invalid object (got: %s (%s))"):format(tostring(v), type(v)), 2)
+                    if v ~= nil and not module.is(v) then
+                        error(("Invalid object (got: %s (%s))"):format(tostring(v), type(v)), 3)
                     end
                     if v ~= nil and v.parent ~= self then
                         error(("Target must be a child of this object"), 2)
@@ -558,7 +577,7 @@ local objectProperties = {
 }
 
 -- pre-defined checking functions for different common shapes
-local checks = {
+module.checks = {
     -- rectangle with top-left origin (common for LÖVE)
     cornerRect = function(self, x, y)
         if type(self.x) ~= "number" or type(self.y) ~= "number" or type(self.w) ~= "number" or type(self.h) ~= "number" then
@@ -588,7 +607,7 @@ local checks = {
         end
         return (x - self.x)^2 / (self.w/2)^2 + (y - self.y)^2 / (self.h)/2^2 <= 1
     end,
-    -- union of all child checks
+    -- union of all child module.checks
     children = function(self, x, y)
         for i, child in ipairs(self.children) do
             if child:check(x, y) then
@@ -598,14 +617,14 @@ local checks = {
         return false
     end
 }
-checks.default = checks.cornerRect
+module.checks.default = module.checks.cornerRect
 
 -- metatable
 local objectMt = {
     __index = function(t, k)
         local ref = objects[t]
         return  k == "class" and ref.class or
-                k == "check" and (ref.check or ref.class and ref.class.check or checks.default) or
+                k == "check" and (ref.check or ref.class and ref.class.check or module.checks.default) or
                 objectProperties[k] and objectProperties[k].get and objectProperties[k].get(t) or
                 objectCallbacks[k] or
                 objectFunctions[k] or
@@ -631,12 +650,11 @@ local objectMt = {
             error(("Cannot override the %q method"):format(tostring(k)), 2)
         elseif objectProperties[k] then
             if objectProperties[k].set then
-                local s, e = pcall(objectProperties[k].set, t, v)
-                if not s then error(e, 3) end
+                objectProperties[k].set(t, v)
             else
                 error(("Cannot modify the %q field"):format(tostring(k)), 2)
             end
-        elseif callbackNames[k] then
+        elseif module.callbackNames[k] then
             if v == nil then
                 ref.callbacks[k] = nil
             elseif type(v) == "boolean" then
@@ -661,7 +679,7 @@ local objectMt = {
 }
 
 -- object constructor
-local function newObject(object, class, ...)
+function module.new(object, class, ...)
     object = type(object) == "table" and object or {}
     if not pcall(setmetatable, object, nil) then
         error("Objects with custom metatables are not supported. If you want to implement an indexing metatable/metamethod, use the 'indexes' field", 2)
@@ -691,26 +709,19 @@ local function newObject(object, class, ...)
         end
     end
     -- initialize parent
-    local s, e = pcall(setk, object, "parent", data.parent or inj.root)
+    local s, e = pcall(setk, object, "parent", data.parent or module.root)
     if not s then error(e, 2) end
     -- call constructor
     if type(object.init) == "function" then
         object:init(...)
     end
     -- initialize screen dimensions
-    if love and love.graphics then
-        object:resize(love.graphics.getDimensions())
-    end
+    object:resize(love.graphics.getDimensions())
     -- export object
     return object
 end
 
 return {
-    module = {
-        is = isObject,
-        new = newObject,
-        checks = checks,
-        callbackNames = callbackNames
-    },
+    module = module,
     inj = inj
 }
