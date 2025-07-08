@@ -99,4 +99,4 @@ arrayMt = {
 return {
     is = isArray,
     new = newArray
-}
+} 

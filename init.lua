@@ -1,163 +1,115 @@
-local _PATH = ...
-local object = require(_PATH .. ".object")
-local class  = require(_PATH .. ".class" )
-local array  = require(_PATH .. ".array" )
+local _PATH = (...):match("(.-)[^%.]+$")
+local core = require((_PATH .. ".core"):match("%.(.+)"))
 
-object.inj.class,  object.inj.array = class.module,  array
-class.inj.object,  class.inj.array  = object.module, array
+-- Import core modules
+local object = core.object
+local class = core.class
+local input = core.input
+local hitbox = core.hitbox
+local array = core.array
 
-local loveCallbackNames, blockingCallbackNames = {
+-- Root object management
+local rootObject = nil
+
+-- LOVE2D callback names that need special handling
+local loveCallbackNames = {
     "resize", "update", "draw", "quit",
-
-    "mousepressed", "mousemoved", "mousereleased", "wheelmoved",
-    "touchpressed", "touchmoved", "touchreleased",
-
-    "keypressed", "keyreleased", "textinput",
-    "filedropped", "directorydropped",
-    "joystickadded", "joystickremoved",
-    "joystickaxis", "joystickhat", "joystickpressed", "joystickreleased",
-    "gamepadaxis", "gamepadpressed", "gamepadreleased"
-}, {
-    "keypressed", "keyreleased", "textinput",
     "filedropped", "directorydropped",
     "joystickadded", "joystickremoved",
     "joystickaxis", "joystickhat", "joystickpressed", "joystickreleased",
     "gamepadaxis", "gamepadpressed", "gamepadreleased"
 }
 
-local emptyf, identityf = function(...) return end, function(...) return ... end
-
-local lib = {
-    checks = setmetatable({}, {
-        __index = object.module.checks,
-        __newindex = function(t, k, v)
-            if v == nil then
-                object.module.checks[k] = nil
-            elseif type(v) == "boolean" then
-                -- a shorthand for an infinite/non-existent hitbox
-                object.module.checks[k] = function() return v end
-            elseif type(v) == "function" then
-                object.module.checks[k] = v
-            else
-                error(("Cannot add non-function value to checks (%q) (got: %s (%s))"):format(tostring(k), tostring(v), type(v)), 2)
-            end
+-- Main library interface
+local floof = {
+    -- Core functionality
+    is = object.is,
+    isObject = object.is,
+    new = object.new,
+    newObject = object.new,
+    
+    -- Class system
+    class = class,
+    
+    -- Array utilities
+    array = array,
+    
+    -- Hitbox detection
+    checks = hitbox.checks,
+    
+    -- Root object management
+    setRoot = function(obj)
+        if obj ~= nil and not object.is(obj) then
+            error(("Invalid object (got: %s (%s))"):format(tostring(obj), type(obj)), 2)
         end
-    }),
-    is = object.module.is, isObject = object.module.is,
-    new = object.module.new, newObject = object.module.new,
-    setRoot = object.module.setRoot,
-    class = class.module,
+        rootObject = obj
+        input.setRoot(obj)
+    end,
+    
+    getRoot = function()
+        return rootObject
+    end,
+    
+    -- Initialize FLOOF with LOVE2D
     init = function()
         if not love then return end
+        
+        -- Initialize input system
+        input.init()
+        
+        -- Hook into LOVE2D callbacks
         local old = {}
         for _, f in ipairs(loveCallbackNames) do
-            old[f] = love[f] or emptyf
+            old[f] = love[f] or function() end
         end
-        for _, f in ipairs(blockingCallbackNames) do
+        
+        -- Handle blocking callbacks (input is handled by input module)
+        for _, f in ipairs{"filedropped", "directorydropped", "joystickadded", "joystickremoved", "joystickaxis", "joystickhat", "joystickpressed", "joystickreleased", "gamepadaxis", "gamepadpressed", "gamepadreleased"} do
             love[f] = function(...)
-                return object.module.root and object.module.root[f](object.module.root, ...) or old[f](...)
+                return rootObject and rootObject[f](rootObject, ...) or old[f](...)
             end
         end
+        
+        -- Handle non-blocking callbacks
         for _, f in ipairs{"resize", "update", "draw", "quit"} do
             love[f] = function(...)
                 old[f](...)
-                if object.module.root then
-                    object.module.root[f](object.module.root, ...)
+                if rootObject then
+                    rootObject[f](rootObject, ...)
                 end
             end
         end
-        love.mousepressed = function(...)
-            local x, y, b, t = ...
-            if b and not t and object.module.root then
-                object.module.root:keypressed(("mouse%d"):format(b))
-            end
-            if b and not t and object.module.root and object.module.root:check(x, y) and object.module.root:pressed(x, y, b) ~= false then
-                return
-            end
-            old.mousepressed(...)
-        end
-        love.mousemoved = function(...)
-            local x, y, dx, dy, t = ...
-            if love.mouse.getRelativeMode() and object.module.root then
-                object.module.root:mousedelta(dx, dy)
-                return
-            end
-            if not t and object.module.root then
-                local r = false
-                for i, b in ipairs(object.module.root.presses) do
-                    if type(b) == "number" then
-                        if object.module.root:moved(x, y, dx, dy, b) then
-                            r = true
-                        end
-                    end
-                end
-                if r then
-                    return
-                end
-            end
-            old.mousemoved(...)
-        end
-        love.mousereleased = function(...)
-            local x, y, b, t = ...
-            if b and not t and object.module.root then
-                object.module.root:keyreleased(("mouse%d"):format(b))
-            end
-            if b and not t and object.module.root and object.module.root.presses:find(b) then
-                object.module.root:released(x, y, b)
-                return
-            end
-            old.mousereleased(...)
-        end
-        love.wheelmoved = function(...)
-            local x, y = ...
-            return object.module.root and object.module.root.isHovered and object.module.root:scrolled(y) or old.wheelmoved(...)
-        end
-        love.touchpressed = function(...)
-            local id, x, y = ...
-            if object.module.root and object.module.root:check(x, y) and object.module.root:pressed(x, y, id) ~= false then
-                return
-            end
-            old.touchpressed(...)
-        end
-        love.touchmoved = function(...)
-            local id, x, y, dx, dy = ...
-            if object.module.root and object.module.root.presses:find(id) and object.module.root:moved(x, y, dx, dy, id) then
-                return
-            end
-            old.touchmoved(...)
-        end
-        love.touchreleased = function(...)
-            local id, x, y = ...
-            if object.module.root and object.module.root.presses:find(id) then
-                object.module.root:released(x, y, id)
-                return
-            end
-            old.touchreleased(...)
+        
+        -- Create default root object if none exists
+        if not rootObject then
+            rootObject = object.new({check = true})
+            input.setRoot(rootObject)
         end
     end
 }
 
-object.module.setRoot(object.module.new{check = true})
-
-return setmetatable({}, {
-	__index = function(t, k)
+-- Module metatable for convenient access
+return setmetatable(floof, {
+    __index = function(t, k)
         if k == "root" then
-            return object.module.root
+            return rootObject
         end
-        return lib[k]
+        return t[k]
     end,
-	__newindex = function(t, k, v)
+    __newindex = function(t, k, v)
         if k == "root" then
-            if v ~= nil and not object.module.is(v) then
+            if v ~= nil and not object.is(v) then
                 error(("Invalid object (got: %s (%s))"):format(tostring(v), type(v)), 2)
             end
-            object.module.setRoot(v)
+            floof.setRoot(v)
+        else
+            rawset(t, k, v)
         end
     end,
-	__metatable = {},
-	__tostring = function() return 'FLOOF' end,
+    __metatable = {},
+    __tostring = function() return 'FLOOF' end,
     __call = function(_, ...)
-        local s, v = pcall(lib.new, ...)
+        local s, v = pcall(object.new, ...)
         if not s then
             error(v, 2)
         else

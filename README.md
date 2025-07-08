@@ -25,16 +25,26 @@ FLOOF helps you build your game using clean, modular Lua code. With built-in sup
 ## 📦 Installation
 
 ```bash
-git clone https://github.com/yourusername/floof.git
+git clone https://github.com/mk8-bruh/floof
 ```
 
-Place the `floof/` directory in your project, and require the core modules as needed:
+Place the `floof/` directory in your project, and require the main module:
 
 ```lua
-floof = require("floof")
+floof = require "floof"
 ```
 
 FLOOF has no dependencies beyond LOVE2D and Lua 5.1+
+
+## 🏗️ Architecture
+
+FLOOF is organized into focused modules for better maintainability:
+
+- **`core/object.lua`** - Object creation and hierarchy management
+- **`core/class.lua`** - Class system and inheritance
+- **`core/input.lua`** - Input handling (mouse, touch, keyboard)
+- **`core/hitbox.lua`** - Hitbox detection functions for UI interaction
+- **`core/array.lua`** - Enhanced array utilities
 
 ---
 
@@ -42,32 +52,46 @@ FLOOF has no dependencies beyond LOVE2D and Lua 5.1+
 
 ```lua
 -- main.lua
-floof = require("floof")
+floof = require "floof"
 
 World = floof.class("World")
 
 Entity = floof.class("Entity")
 
-function Entity:init(world, x, y, w, h)
+function Entity:init(world, x, y, w, h, weight)
+    self.parent = world
     self.x, self.y, self.w, self.h = x, y, w, h
+    self.weight = weight or 1
+
+    self.px, self.py = x, y
+end
+
+function Entity:draw()
+    love.graphics.setColor(1, 1, 1)
+    love.graphics.setLineWidth(1)
+    love.graphics.rectangle("line", self.x, self.y, self.w, self.h)
 end
 
 Player = floof.class("Player", Entity)
 
-function Player:init()
-    self.x, self.y = 100, 100
+function Player:init(world, x, y, moveSpeed)
+    self.moveSpeed = moveSpeed
+    self.super.init(self, world, x, y, 100, 100)
 end
 
 function Player:update(dt)
-    self.x = self.x + 50 * self.horizontalInput * dt
+    self.x = self.x + self.horizontalInput * self.moveSpeed * dt
+    self.y = self.y + self.verticalInput   * self.moveSpeed * dt
 end
 
 function Player:draw()
-    love.graphics.rectangle("fill", self.x, self.y, 32, 32)
+    love.graphics.setColor(1, 0, 0)
+    love.graphics.rectangle("fill", self.x, self.y, self.w, self.h)
 end
 
 function love.load()
-    player = Player()
+    world = World()
+    player = Player(world, 0, 0)
 
     floof.init() -- hook into LOVE2D callbacks
 end

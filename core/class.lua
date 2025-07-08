@@ -1,10 +1,15 @@
 local _PATH = (...):match("(.-)[^%.]+$")
-local inj = {} -- dependency injection table
+local array = require(_PATH .. ".array")
 
--- dummy functions
-local emptyf = function(...) return end
-local setk      = function(t, k, v) t[k] = v end
+-- Class identification and management
+local classes = setmetatable({}, {__mode = "k"})
+local named = setmetatable({}, {__mode = "v"})
 
+local function isClass(o, c)
+    return o and classes[o] ~= nil and (not c or o == c or isClass(classes[o].super, c))
+end
+
+-- Index traversal for mixins
 local function _index(indexes, t, k, visited)
     for i, index in ipairs(indexes) do
         local v
@@ -12,51 +17,42 @@ local function _index(indexes, t, k, visited)
             v = index[k]
         elseif type(index) == "function" then
             local s, e = pcall(index, t, k)
-            if not s then error(("Error while trying to access field %s (layer %d, %s): %s"):format(type(k) == "string" and '"'..k..'"' or tostring(k), i, tostring(index), e), 3) else v = e end
+            if not s then 
+                error(("Error while trying to access field %s (layer %d, %s): %s"):format(
+                    type(k) == "string" and '"'..k..'"' or tostring(k), i, tostring(index), e), 3) 
+            else 
+                v = e 
+            end
         end
         if v ~= nil then return v end
     end
 end
 
-local class  = {}
-local classes = setmetatable({}, {__mode = "k"})
-local named   = setmetatable({}, {__mode = "v"})
-
-function class.is(o, c)
-    return  inj.object.is(o) and class.is(c) and (o.class == c or class.is(o.class.super, c)) or
-            o and classes[o] ~= nil
-end
-
-function class.index(o, ...)
-    if inj.object.is(o) or class.is(o) then
-        for k, i in ipairs{...} do
-            o.indexes:push(i, k)
-        end
-    end
-end
-
+-- Class metatable
 local classMt = {
     __index = function(c, k)
         local ref = c and classes[c]
         if not ref then return end
-        return  k == "name" and ref.name or
-                k == "super" and ref.super or
-                k == "check" and ref.check or
-                k == "indexes" and ref.indexes or
-                ref.callbacks[k] or
-                _index(ref.indexes, c, k) or
-                ref.super and ref.super[k] or
-                class[k]
+        
+        return k == "name" and ref.name or
+               k == "super" and ref.super or
+               k == "check" and ref.check or
+               k == "indexes" and ref.indexes or
+               ref.callbacks[k] or
+               _index(ref.indexes, c, k) or
+               ref.super and ref.super[k]
     end,
+    
     __newindex = function(c, k, v)
         local ref = c and classes[c]
         if not ref then return end
+        
         if k == "name" then
             if type(v) == "string" then
                 if named[v] then
                     error(("A class named %q already exists"):format(v), 2)
                 end
-                if named[ref.name] then named[name] = nil end
+                if named[ref.name] then named[ref.name] = nil end
                 ref.name = v
                 named[v] = c
             elseif v == nil then
@@ -81,7 +77,8 @@ local classMt = {
             else
                 error(("%q must be assigned an array of index tables (got: %s (%s))"):format(k, tostring(v), type(v)), 2)
             end
-        elseif inj.object.callbackNames[k] then
+        elseif k == "callbacks" then
+            -- Handle callback assignments
             if v == nil then
                 ref.callbacks[k] = nil
             elseif type(v) == "boolean" then
@@ -91,69 +88,105 @@ local classMt = {
             else
                 error(("Cannot assign non-function value to %q (got: %s (%s))"):format(k, tostring(v), type(v)), 2)
             end
-        elseif class[k] then
-            error(("Cannot override the %q method"):format(tostring(k)), 2)
         else
             rawset(c, k, v)
         end
     end,
+    
     __metatable = {},
     __tostring = function(c)
         local ref = c and classes[c]
         if not ref then return end
         return ("class: %s"):format(ref.name)
     end,
+    
     __call = function(c, ...)
-        return inj.object.new({}, c, ...)
+        -- This will be handled by the object module
+        error("Classes should be instantiated through floof.new() or object.new()", 2)
     end
 }
 
-local function new(_, name, super, c)
+-- Class methods
+local classMethods = {
+    index = function(c, ...)
+        if isClass(c) then
+            for k, i in ipairs{...} do
+                c.indexes:push(i, k)
+            end
+        end
+    end
+}
+
+-- Class constructor
+local function newClass(name, super, blueprint)
     if name and type(name) ~= "string" then
-        super, c, name = name, super
+        super, blueprint, name = name, super
     end
-    if super and not class.is(super) then
-        c, super = super
+    if super and not isClass(super) then
+        blueprint, super = super
     end
-    c = type(c) == "table" and c or {}
-    if not pcall(setmetatable, c, nil) then
+    
+    blueprint = type(blueprint) == "table" and blueprint or {}
+    
+    if not pcall(setmetatable, blueprint, nil) then
         error("Classes with custom metatables are not supported. If you want to implement an indexing metatable/metamethod, use the 'indexes' field", 2)
     end
-    name = name or tostring(c):match("table: (.+)") or tostring(c)
+    
+    name = name or tostring(blueprint):match("table: (.+)") or tostring(blueprint)
+    
     if name then
         if named[name] then
             error(("A class named %q already exists"):format(name), 2)
-        elseif class[k] then
-            error(("Invalid class name: %q. Please choose a different name"):format(name), 2)
         else
-            named[name] = c
+            named[name] = blueprint
         end
     end
+    
     local ref = {
         name = name,
         super = super,
         check = nil,
-        indexes = inj.array.new(),
+        indexes = array.new(),
         callbacks = {}
     }
-    classes[c] = ref
+    
+    classes[blueprint] = ref
+    
+    -- Copy data before transforming
     local data = {}
-    for k, v in pairs(c) do data[k], c[k] = v end
-    setmetatable(c, classMt)
+    for k, v in pairs(blueprint) do 
+        data[k], blueprint[k] = v 
+    end
+    
+    setmetatable(blueprint, classMt)
+    
+    -- Copy data back
     for k, v in pairs(data) do
-        local s, e = pcall(setk, c, k, v)
+        local s, e = pcall(function() rawset(blueprint, k, v) end)
         if not s then error(e, 2) end
     end
-    return c
+    
+    return blueprint
 end
 
-return {
-    module = setmetatable({}, {
-        __index = function(_, k) return class[k] or named[k] end,
-        __newindex = function() end,
-        __metatable = {},
-        __tostring = function() return "FLOOF class module" end,
-        __call = new,
-    }),
-    inj = inj
+-- Module interface
+local module = {
+    is = isClass,
+    new = newClass
 }
+
+-- Add class methods to module
+for k, v in pairs(classMethods) do
+    module[k] = v
+end
+
+-- Module metatable for named access
+return setmetatable(module, {
+    __index = function(_, k) 
+        return module[k] or named[k] 
+    end,
+    __newindex = function() end,
+    __metatable = {},
+    __tostring = function() return "FLOOF class module" end,
+    __call = newClass
+}) 
