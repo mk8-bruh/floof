@@ -5,6 +5,8 @@ local array = require(_PATH .. ".array")
 local classes = setmetatable({}, {__mode = "k"})
 local named = setmetatable({}, {__mode = "v"})
 
+
+
 local function isClass(o, c)
     return o and classes[o] ~= nil and (not c or o == c or isClass(classes[o].super, c))
 end
@@ -101,8 +103,11 @@ local classMt = {
     end,
     
     __call = function(c, ...)
-        -- This will be handled by the object module
-        error("Classes should be instantiated through floof.new() or object.new()", 2)
+        -- Create a new object with this class (lazy load to avoid circular dependency)
+        if not classMt.objectModule then
+            classMt.objectModule = require(_PATH .. ".object")
+        end
+        return classMt.objectModule.new({}, c, ...)
     end
 }
 

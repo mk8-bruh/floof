@@ -32,6 +32,7 @@ local function createObjectInternal()
         enabled = true,
         active = nil,
         indexes = array.new(),
+        needsSort = false,
         -- Input state
         presses = array.new(),
         pressedObject = {},
@@ -55,9 +56,9 @@ local objectProperties = {
             local internal = objects[self].internal
             if internal.parent == value then return end
             
-            if value ~= nil and not isObject(value) then
-                error(("Parent must be an object (got: %s (%s))"):format(tostring(value), type(value)), 3)
-            end
+                    if value ~= nil and not isObject(value) then
+            error(("Parent must be a FLOOF object (got: %s (%s)). Use floof.new() to create objects."):format(tostring(value), type(value)), 3)
+        end
             
             if self == value then
                 error(("Cannot assign object as its own parent"), 3)
@@ -97,6 +98,10 @@ local objectProperties = {
     children = {
         get = function(self)
             local internal = objects[self].internal
+            -- Ensure children are sorted if needed
+            if internal.needsSort then
+                self:refreshChildren()
+            end
             local children = array.new()
             for i, e in ipairs(internal.children) do
                 children:append(e)
@@ -104,12 +109,12 @@ local objectProperties = {
             return children
         end,
         set = function(self, value)
-            if type(value) ~= "table" then
-                error(("Value must be a table of objects (got: %s (%s))"):format(tostring(value), type(value)), 3)
-            end
+                    if type(value) ~= "table" then
+            error(("Children must be a table of FLOOF objects (got: %s (%s)). Use floof.new() to create objects."):format(tostring(value), type(value)), 3)
+        end
             for i, v in ipairs(value) do
                 if not isObject(v) then
-                    error(("Non-object value at index %d: %s (%s)"):format(i, tostring(v), type(v)), 3)
+                    error(("Non-FLOOF object at index %d: %s (%s). Use floof.new() to create objects."):format(i, tostring(v), type(v)), 3)
                 end
                 if self:isChildOf(v) then
                     error(("Cannot assign object as a child of its child"), 3)
@@ -129,9 +134,10 @@ local objectProperties = {
             if type(value) ~= "number" then
                 error(("Z value must be a number (got: %s (%s))"):format(tostring(value), type(value)), 3)
             end
+            if internal.z == value then return end
             internal.z = value
             if self.parent then 
-                self.parent:refreshChildren() 
+                self.parent.internal.needsSort = true
             end
         end
     },
@@ -216,7 +222,6 @@ end
 for k, v in pairs(input.methods) do
     objectMethods[k] = v
 end
-}
 
 -- Object methods
 local objectMethods = {
@@ -230,17 +235,51 @@ local objectMethods = {
         else
             internal.childRegister[object] = nil
         end
-        self:refreshChildren()
+        self:rebuildChildren()
     end,
     
-    refreshChildren = function(self)
+    rebuildChildren = function(self)
         local internal = objects[self].internal
         internal.children = array.new()
         for child in pairs(internal.childRegister) do
             internal.children:append(child)
         end
-        -- Sort by z-index (highest first)
-        table.sort(internal.children, function(childA, childB) return childA.z > childB.z end)
+        -- Mark as needing sort
+        internal.needsSort = true
+    end,
+    
+    refreshChildren = function(self)
+        local internal = objects[self].internal
+        if internal.needsSort then
+            -- Sort by z-index (highest first)
+            table.sort(internal.children, function(childA, childB) return childA.z > childB.z end)
+            internal.needsSort = false
+        end
+    end,
+    
+    addChild = function(self, child)
+        if not isObject(child) then
+            error(("Invalid child object (got: %s (%s))"):format(tostring(child), type(child)), 3)
+        end
+        child.parent = self
+        return child
+    end,
+    
+    removeChild = function(self, child)
+        if not isObject(child) then
+            error(("Invalid child object (got: %s (%s))"):format(tostring(child), type(child)), 3)
+        end
+        if child.parent == self then
+            child.parent = nil
+        end
+        return child
+    end,
+    
+
+    
+    setParent = function(self, parent)
+        self.parent = parent
+        return self
     end,
     
     isChildOf = function(self, object)
@@ -253,6 +292,42 @@ local objectMethods = {
             currentParent = currentParent.parent
         end
         return false
+    end,
+    
+    send = function(self, message, ...)
+        -- Check if message is not a callback or internal function
+        if callbackNames[message] or objectMethods[message] or objectProperties[message] then
+            error(("Cannot send message %q - it is a reserved name"):format(message), 3)
+        end
+        
+        -- Send message to all children that have the function
+        for _, child in ipairs(self.children) do
+            if child.isEnabled then
+                local func = child[message]
+                if type(func) == "function" then
+                    func(child, ...)
+                end
+            end
+        end
+    end,
+    
+    broadcast = function(self, message, ...)
+        -- Check if message is not a callback or internal function
+        if callbackNames[message] or objectMethods[message] or objectProperties[message] then
+            error(("Cannot broadcast message %q - it is a reserved name"):format(message), 3)
+        end
+        
+        -- Broadcast message to all children that have the function
+        for _, child in ipairs(self.children) do
+            if child.isEnabled then
+                local func = child[message]
+                if type(func) == "function" then
+                    func(child, ...)
+                    -- Recursively broadcast to children
+                    child:broadcast(message, ...)
+                end
+            end
+        end
     end
 }
 
@@ -296,7 +371,7 @@ local defaultCallbacks = {
         if preDraw then preDraw(self) end
         
         local hasDrawn = false
-        local children = internal.children
+        local children = self.children
         for index = #children, 1, -1 do
             local child = children[index]
             if child.z >= 0 and not hasDrawn then

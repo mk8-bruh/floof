@@ -43,53 +43,22 @@ local hitboxChecks = {
         return false
     end,
     
-    -- Point hitbox (always returns true if coordinates match)
-    point = function(self, x, y)
-        if type(self.x) ~= "number" or type(self.y) ~= "number" then
-            return false
-        end
-        return x == self.x and y == self.y
-    end,
-    
-    -- Line segment hitbox
-    line = function(self, x, y)
-        if type(self.x1) ~= "number" or type(self.y1) ~= "number" or type(self.x2) ~= "number" or type(self.y2) ~= "number" then
-            return false
-        end
-        
-        local tolerance = self.tolerance or 5
-        local deltaX = self.x2 - self.x1
-        local deltaY = self.y2 - self.y1
-        local length = math.sqrt(deltaX * deltaX + deltaY * deltaY)
-        
-        if length == 0 then
-            return x == self.x1 and y == self.y1
-        end
-        
-        local t = ((x - self.x1) * deltaX + (y - self.y1) * deltaY) / (length * length)
-        t = math.max(0, math.min(1, t))
-        
-        local closestX = self.x1 + t * deltaX
-        local closestY = self.y1 + t * deltaY
-        
-        local distance = math.sqrt((x - closestX)^2 + (y - closestY)^2)
-        return distance <= tolerance
-    end,
-    
-    -- Polygon hitbox (convex polygon)
+    -- Polygon hitbox (convex polygon) - uses LOVE2D format {x1, y1, x2, y2, x3, y3, ...}
     polygon = function(self, x, y)
-        if not self.vertices or #self.vertices < 3 then
+        if not self.vertices or #self.vertices < 6 then
             return false
         end
         
         local inside = false
-        local j = #self.vertices
+        local j = #self.vertices - 1
         
-        for i = 1, #self.vertices do
-            local vertexI = self.vertices[i]
-            local vertexJ = self.vertices[j]
+        for i = 1, #self.vertices, 2 do
+            local vertexIx = self.vertices[i]
+            local vertexIy = self.vertices[i + 1]
+            local vertexJx = self.vertices[j]
+            local vertexJy = self.vertices[j + 1]
             
-            if ((vertexI.y > y) ~= (vertexJ.y > y)) and (x < (vertexJ.x - vertexI.x) * (y - vertexI.y) / (vertexJ.y - vertexI.y) + vertexI.x) then
+            if ((vertexIy > y) ~= (vertexJy > y)) and (x < (vertexJx - vertexIx) * (y - vertexIy) / (vertexJy - vertexIy) + vertexIx) then
                 inside = not inside
             end
             j = i
