@@ -1,102 +1,111 @@
-local arrays = setmetatable({}, {__mode = "k"})
-local function isArray(t)
-    return arrays[t] or false
+local class = require("class")
+
+local ntostr = function(n) 
+    return tostring(n):match("^(.-%..-)0000.*$") or tostring(n) 
 end
-local ntostr = function(n) return tostring(n):match("^(.-%..-)0000.*$") or tostring(n) end -- number string truncation (get rid of excessive decimals)
-local arrayMethods = {
-    push = function(t, v, i)
-        if not isArray(t) then return end
-        if type(i) ~= "number" or i ~= math.floor(i) then return end
-        i = i or 1
-        if i <= 0 then
-            i = #t + i + 1
-        end
-        if i <= 0 or i > #t + 1 then return end
-        table.insert(t, i, v)
-    end,
-    pop = function(t, i)
-        if not isArray(t) then return end
-        if type(i) ~= "number" or i ~= math.floor(i) then return end
-        i = i or 1
-        if i <= 0 then
-            i = #t + i + 1
-        end
-        if i <= 0 or i > #t then return end
-        return table.remove(t, i)
-    end,
-    append = function(t, v)
-        if not isArray(t) then return end
-        table.insert(t, v)
-    end,
-    find = function(t, v)
-        if not isArray(t) then return end
-        for i = 1, #t do
-            if t[i] == v then
-                return i
-            end
-        end
-    end,
-    remove = function(t, v)
-        if not isArray(t) then return end
-        for i = #t, 1, -1 do
-            if t[i] == v then
-                t:pop(i)
-            end
+
+local Array = class("Array")
+
+function Array:init(...)
+    self._data = {}
+    for i, v in ipairs{...} do
+        self:append(v)
+    end
+end
+
+function Array:push(v, i)
+    if type(i) ~= "number" or i ~= math.floor(i) then return end
+    i = i or 1
+    if i <= 0 then
+        i = #self._data + i + 1
+    end
+    if i <= 0 or i > #self._data + 1 then return end
+    table.insert(self._data, i, v)
+end
+
+function Array:pop(i)
+    if type(i) ~= "number" or i ~= math.floor(i) then return end
+    i = i or 1
+    if i <= 0 then
+        i = #self._data + i + 1
+    end
+    if i <= 0 or i > #self._data then return end
+    return table.remove(self._data, i)
+end
+
+function Array:append(v)
+    table.insert(self._data, v)
+end
+
+function Array:find(v)
+    for i = 1, #self._data do
+        if self._data[i] == v then
+            return i
         end
     end
-}
-local arrayMt
-local function newArray(...)
-    local array = setmetatable({}, arrayMt)
-    arrays[array] = true
-    for i, v in ipairs{...} do
+end
+
+function Array:remove(v)
+    for i = #self._data, 1, -1 do
+        if self._data[i] == v then
+            self:pop(i)
+        end
+    end
+end
+
+function Array:clear()
+    self._data = {}
+end
+
+function Array:length()
+    return #self._data
+end
+
+function Array:isEmpty()
+    return #self._data == 0
+end
+
+Array:meta("get", function(self, k)
+    if type(k) == "number" and k == math.floor(k) then
+        if k <= 0 then
+            k = #self._data + k + 1
+        end
+        return rawget(self._data, k)
+    end
+    return nil
+end)
+
+Array:meta("set", function(self, k, v)
+    if type(k) == "number" and k == math.floor(k) then
+        if k <= 0 then
+            k = #self._data + k + 1
+        end
+        if k <= 0 or k > #self._data + 1 then return end
+        rawset(self._data, k, v)
+    else
+        rawset(self, k, v)
+    end
+end)
+
+Array:meta("tostring", function(self)
+    if #self._data == 0 then return "[]" end
+    local s = "["..ntostr(self._data[1])
+    for i = 2, #self._data do
+        s = s .. (", %s"):format(ntostr(self._data[i]))
+    end
+    return s.."]"
+end)
+
+Array:meta("concat", function(self, other)
+    if not class.isInstance(other, Array) then return end
+    local array = Array()
+    for i, v in ipairs(self._data) do
+        array:append(v)
+    end
+    for i, v in ipairs(other._data) do
         array:append(v)
     end
     return array
-end
-arrayMt = {
-    __index = function(t, k)
-        if type(k) == "number" and k == math.floor(k) then
-            if k <= 0 then
-                k = #t + k + 1
-            end
-            return rawget(t, k)
-        else
-            return arrayMethods[k]
-        end
-    end,
-    __newindex = function(t, k, v)
-        if type(k) == "number" and k == math.floor(k) then
-            if k <= 0 then
-                k = #t + k + 1
-            end
-            if k <= 0 or k > #t + 1 then return end
-            rawset(t, k, v)
-        end
-    end,
-    __tostring = function(t)
-        if #t == 0 then return "[]" end
-        local s = "["..ntostr(t[1])
-        for i = 2, #t do
-            s = s .. (", %s"):format(ntostr(t[i]))
-        end
-        return s.."]"
-    end,
-    __concat = function(a, b)
-        if not isArray(a) or not isArray(b) then return end
-        local array = newArray()
-        for i, v in ipairs(a) do
-            table.insert(array, v)
-        end
-        for i, v in ipairs(b) do
-            table.insert(array, v)
-        end
-        return array
-    end,
-    __metatable = {}
-}
+end)
 
-return {
-    is = isArray,
-    new = newArray
-}
+return Array
