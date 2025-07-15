@@ -7,70 +7,94 @@ end
 local Array = class("Array")
 
 function Array:init(...)
-    self._data = {}
+    self._length = 0
     for i, v in ipairs{...} do
         self:append(v)
     end
 end
 
 function Array:push(v, i)
-    if type(i) ~= "number" or i ~= math.floor(i) then return end
     i = i or 1
+    if type(i) ~= "number" or i ~= math.floor(i) then return end
     if i <= 0 then
-        i = #self._data + i + 1
+        i = self.length + i + 1
     end
-    if i <= 0 or i > #self._data + 1 then return end
-    table.insert(self._data, i, v)
+    if i <= 0 or i > self.length + 1 then return end
+    self._length = self._length + 1
+    table.insert(self, i, v)
+    return self
 end
 
 function Array:pop(i)
-    if type(i) ~= "number" or i ~= math.floor(i) then return end
     i = i or 1
+    if type(i) ~= "number" or i ~= math.floor(i) then return end
     if i <= 0 then
-        i = #self._data + i + 1
+        i = self.length + i + 1
     end
-    if i <= 0 or i > #self._data then return end
-    return table.remove(self._data, i)
+    if i <= 0 or i > self.length then return end
+    self._length = self._length - 1
+    return table.remove(self, i)
 end
 
 function Array:append(v)
-    table.insert(self._data, v)
+    if Array:isClassOf(v) then
+        for i, e in ipairs(v) do
+            self:append(e)
+        end
+    else
+        self._length = self._length + 1
+        table.insert(self, v)
+    end
+    return self
 end
 
 function Array:find(v)
-    for i = 1, #self._data do
-        if self._data[i] == v then
+    for i = 1, self.length do
+        if self[i] == v then
             return i
         end
     end
 end
 
 function Array:remove(v)
-    for i = #self._data, 1, -1 do
-        if self._data[i] == v then
+    for i = self.length, 1, -1 do
+        if self[i] == v then
             self:pop(i)
         end
     end
+    return self
 end
 
 function Array:clear()
-    self._data = {}
+    for i = 1, self.length do
+        self[i] = nil
+    end
+    self._length = 0
+    return self
 end
 
-function Array:length()
-    return #self._data
+function Array:unpack()
+    return table.unpack(self)
 end
 
-function Array:isEmpty()
-    return #self._data == 0
+function Array:clone()
+    local array = Array()
+    for i, v in ipairs(self) do
+        array:append(v)
+    end
+    return array
 end
+
+Array:getter("length", function(self)   
+    return self._length
+end)
 
 Array:meta("get", function(self, k)
     if type(k) == "number" and k == math.floor(k) then
         if k <= 0 then
-            k = #self._data + k + 1
+            k = self.length + k + 1
         end
-        return rawget(self._data, k)
+        return rawget(self, k)
     end
     return nil
 end)
@@ -78,34 +102,27 @@ end)
 Array:meta("set", function(self, k, v)
     if type(k) == "number" and k == math.floor(k) then
         if k <= 0 then
-            k = #self._data + k + 1
+            k = self.length + k + 1
         end
-        if k <= 0 or k > #self._data + 1 then return end
-        rawset(self._data, k, v)
+        if k <= 0 or k > self.length then return end
+        rawset(self, k, v)
     else
         rawset(self, k, v)
     end
 end)
 
 Array:meta("tostring", function(self)
-    if #self._data == 0 then return "[]" end
-    local s = "["..ntostr(self._data[1])
-    for i = 2, #self._data do
-        s = s .. (", %s"):format(ntostr(self._data[i]))
+    if self.length == 0 then return "[]" end
+    local s = "[" .. ntostr(self[1])
+    for i = 2, self.length do
+        s = s .. ", " .. ntostr(self[i])
     end
-    return s.."]"
+    return s .. "]"
 end)
 
 Array:meta("concat", function(self, other)
-    if not class.isInstance(other, Array) then return end
-    local array = Array()
-    for i, v in ipairs(self._data) do
-        array:append(v)
-    end
-    for i, v in ipairs(other._data) do
-        array:append(v)
-    end
-    return array
+    if not class.isInstanceOf(other, Array) then return end
+    return self:clone():append(other)
 end)
 
 return Array

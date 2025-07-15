@@ -122,20 +122,24 @@ function class.isClass(c)
     return c ~= nil and classes[c] ~= nil
 end
 
-function class.isObject(o)
+function class.isInstance(o)
     return o ~= nil and instances[o] ~= nil
 end
 
 function class.getClass(o)
-    return class.isObject(o) and instances[o].class
+    return class.isInstance(o) and instances[o].class
 end
 
-function class.isInstance(o, c)
-    return class.isObject(o) and class.isClass(c) and (instances[o].class == c or class.isClass(instances[o].class.super, c))
+function class.isClassOf(c, o)
+    return class.isClass(c) and (class.isInstance(o) and class.isInstanceOf(o, c) or class.isClass(o) and (o.super == c or class.isClassOf(c, o.super)))
+end
+
+function class.isInstanceOf(o, c)
+    return class.isInstance(o) and class.isClass(c) and (o.class == c or class.isClassOf(c, o.class))
 end
 
 function class.index(o, ...)
-    if not class.isObject(o) and not class.isClass(o) then
+    if not class.isInstance(o) and not class.isClass(o) then
         error("Indexing can only be done on classes or objects", 2)
     end
     local ref = instances[o] or classes[o]
@@ -155,7 +159,7 @@ function class.getter(o, name, func)
     if not name:match("^[%a][_%w]*$") then
         error(("Invalid property name: %q (must start with a letter and contain only letters, numbers and underscores)"):format(name), 2)
     end
-    if not class.isObject(o) and not class.isClass(o) then
+    if not class.isInstance(o) and not class.isClass(o) then
         error("Properties can only be added to classes or objects", 2)
     end
     if type(func) ~= "function" then
@@ -180,7 +184,7 @@ function class.setter(o, name, func)
     if not name:match("^[%a][_%w]*$") then
         error(("Invalid property name: %q (must start with a letter and contain only letters, numbers and underscores)"):format(name), 2)
     end
-    if not class.isObject(o) and not class.isClass(o) then
+    if not class.isInstance(o) and not class.isClass(o) then
         error("Properties can only be added to classes or objects", 2)
     end
     if type(func) ~= "function" then
@@ -205,7 +209,7 @@ function class.property(o, name, getter, setter)
     if not name:match("^[%a][_%w]*$") then
         error(("Invalid property name: %q (must start with a letter and contain only letters, numbers and underscores)"):format(name), 2)
     end
-    if not class.isObject(o) and not class.isClass(o) then
+    if not class.isInstance(o) and not class.isClass(o) then
         error("Properties can only be added to classes or objects", 2)
     end
     if getter and type(getter) ~= "function" then
@@ -231,7 +235,7 @@ function class.meta(o, name, func)
     if not metamethods[name] then
         error(("Unsupported metamethod: %q"):format(name), 2)
     end
-    if not class.isObject(o) and not class.isClass(o) then
+    if not class.isInstance(o) and not class.isClass(o) then
         error("Metamethods can only be added to classes or objects", 2)
     end
     if type(func) ~= "function" then
@@ -443,7 +447,7 @@ return setmetatable({}, {
     __index = function(_, k) return class[k] or named[k] end,
     __newindex = function() end,
     __metatable = {},
-    __tostring = function() return "FLOOF" end,
+    __tostring = function() return "<FLOOF class module>" end,
     __call = function(_, name, super, c)
         if name and type(name) ~= "string" then
             super, c, name = name, super
