@@ -1,10 +1,11 @@
 -- FLOOF: Unified class system with object-oriented features
--- Copyright (c) 2024 Matus Kordos
+-- Copyright (c) 2025 Matus Kordos
 
 local class = {}
 local classes   = setmetatable({}, {__mode = "k"})
 local named     = setmetatable({}, {__mode = "v"})
 local instances = setmetatable({}, {__mode = "k"})
+local ids       = setmetatable({}, {__mode = "v"})
 
 local function _index(indexes, t, k, visited)
     for i, index in ipairs(indexes) do
@@ -28,6 +29,12 @@ end
 local metamethods = {
     get = "index",
     set = "newindex",
+    call = "call",
+    tostring = "tostring",
+    minus = "unm"
+}
+
+local operators = {
     equals = "eq",
     lessthan = "lt", 
     lessequal = "le",
@@ -37,20 +44,42 @@ local metamethods = {
     divide = "div",
     modulo = "mod",
     power = "pow",
-    minus = "unm",
-    concat = "concat",
-    call = "call",
-    tostring = "tostring"
+    concat = "concat"
 }
 
 local function getMetamethod(o, name)
-    if not o then return end
-    local ref = instances[o] or classes[o]
-    return ref.meta[name] or getMetamethod(ref.class or ref.super, name)
+    if class.isInstance(o) then
+        local ref = instances[o]
+        if ref.meta[name] then
+            return ref.meta[name]
+        end
+        if ref.class then
+            return getMetamethod(ref.class, name)
+        end
+    elseif class.isClass(o) then
+        local ref = classes[o]
+        if ref.meta[name] then
+            return ref.meta[name]
+        end
+        if ref.super then
+            return getMetamethod(ref.super, name)
+        end
+    end
+    return nil
 end
 
 local function _get(o, k)
-    local ref = instances[o]
+    if not o then return end
+    local ref = instances[o] or classes[o]
+
+    if class[k] then
+        return class[k]
+    end
+
+    local rawResult = rawget(o, k)
+    if rawResult ~= nil then
+        return rawResult
+    end
     
     if ref.getters[k] then
         return ref.getters[k](o)
@@ -61,12 +90,7 @@ local function _get(o, k)
         return indexResult
     end
     
-    local rawResult = rawget(o, k)
-    if rawResult ~= nil then
-        return rawResult
-    end
-    
-    local c = ref.class
+    local c = ref.class or ref.super
     while c do
         local cref = classes[c]
         if cref.getters[k] then
@@ -75,39 +99,47 @@ local function _get(o, k)
         c = c.super
     end
     
-    if ref.class[k] then return ref.class[k] end
-    
-    local meta = getMetamethod(o, "get")
+    local meta = ref.meta.get
     if meta then
-        return meta(o, k)
+        local metaResult = meta(o, k)
+        if metaResult ~= nil then
+            return metaResult
+        end
     end
     
-    return nil
+    return _get(ref.class or ref.super, k)
 end
 
 local function _set(o, k, v)
-    local ref = instances[o]
+    if not o then return end
+    local ref = instances[o] or classes[o]
     
+    if class[k] and k ~= "clone" then
+        error(("Cannot assign value to %q as it is a reserved field"):format(k), 3)
+    end
+
     if ref.setters[k] then
         return ref.setters[k](o, v)
+    elseif ref.getters[k] then
+        error(("Cannot assign value to property %q of %s as it is read-only"):format(k, tostring(o)), 3)
     end
     
-    local c = o
+    local c = ref.class or ref.super
     while c do
         local cref = instances[c] or classes[c]
         if cref.setters[k] then
             return cref.setters[k](o, v)
         end
-        c = c.class or c.super
+        c = c.super
     end
     
-    c = o
+    c = ref.class or ref.super
     while c do
         local cref = instances[c] or classes[c]
         if cref.getters[k] then
-            error(("Cannot assign value to property %q of %s as it has no setter defined"):format(k, tostring(c)), 2)
+            error(("Cannot assign value to property %q of %s as it is read-only"):format(k, tostring(c)), 3)
         end
-        c = c.class or c.super
+        c = c.super
     end
     
     local meta = getMetamethod(o, "set")
@@ -128,6 +160,10 @@ end
 
 function class.getClass(o)
     return class.isInstance(o) and instances[o].class
+end
+
+function class.getInstance(id)
+    return ids[id]
 end
 
 function class.isClassOf(c, o)
@@ -165,12 +201,8 @@ function class.getter(o, name, func)
     if type(func) ~= "function" then
         error(("Property getter must be a function (got: %s)"):format(type(func)), 2)
     end
-    local c = o
-    while c do
-        if rawget(c, name) then
-            error(("Cannot override field %q (%s) of %s"):format(name, type(c[name]), tostring(c)), 2)
-        end
-        c = c.class or c.super or (c ~= class and class)
+    if class.isInstance(o) and rawget(o, name) then
+        error(("Cannot override field %q (%s)"):format(name, type(o[name])), 2)
     end
     local ref = instances[o] or classes[o]
     ref.getters[name] = func
@@ -190,12 +222,8 @@ function class.setter(o, name, func)
     if type(func) ~= "function" then
         error(("Property setter must be a function (got: %s)"):format(type(func)), 2)
     end
-    local c = o
-    while c do
-        if rawget(c, name) then
-            error(("Cannot override field %q (%s) of %s"):format(name, type(c[name]), tostring(c)), 2)
-        end
-        c = c.class or c.super or (c ~= class and class)
+    if class.isInstance(o) and rawget(o, name) then
+        error(("Cannot override field %q (%s)"):format(name, type(o[name])), 2)
     end
     local ref = instances[o] or classes[o]
     ref.setters[name] = func
@@ -218,12 +246,8 @@ function class.property(o, name, getter, setter)
     if setter and type(setter) ~= "function" then
         error(("Property setter must be a function (got: %s)"):format(type(setter)), 2)
     end
-    local c = o
-    while c do
-        if rawget(c, name) then
-            error(("Cannot override field %q (%s) of %s"):format(name, type(c[name]), tostring(c)), 2)
-        end
-        c = c.class or c.super or (c ~= class and class)
+    if class.isInstance(o) and rawget(o, name) then
+        error(("Cannot override field %q (%s)"):format(name, type(o[name])), 2)
     end
     local ref = instances[o] or classes[o]
     ref.getters[name] = getter
@@ -232,7 +256,7 @@ function class.property(o, name, getter, setter)
 end
 
 function class.meta(o, name, func)
-    if not metamethods[name] then
+    if not metamethods[name] and not operators[name] then
         error(("Unsupported metamethod: %q"):format(name), 2)
     end
     if not class.isInstance(o) and not class.isClass(o) then
@@ -249,43 +273,30 @@ end
 local objectMt = {
     __index = function(o, k)
         local ref = instances[o]
-        if type(k) ~= "string" then 
-            local meta = getMetamethod(o, "get")
-            if meta then
-                return meta(o, k)
-            end
-            return rawget(o, k)
-        elseif k == "id" or k == "class" or k == "indexes" then
+        if k == "id" or k == "class" or k == "indexes" then
             return ref[k]
-        elseif k:match("^__") then
+        elseif type(k) == "string" and k:match("^__") then
             return getMetamethod(o, k:sub(3))
-        elseif k:match("^@get_(.+)") and ref.getters[k:match("^@get_(.+)")] then
-            return ref.getters[k:match("^@get_(.+)")]
-        elseif k:match("^@set_(.+)") and ref.setters[k:match("^@set_(.+)")] then
-            return ref.setters[k:match("^@set_(.+)")]
+        elseif type(k) == "string" and k:match("^@get_(.+)") and ref.getters[k:match("^@get_(.+)")] then
+            return ref.getters[k:match("^@get_(.+)")] or ref.class and ref.class[k]
+        elseif type(k) == "string" and k:match("^@set_(.+)") and ref.setters[k:match("^@set_(.+)")] then
+            return ref.setters[k:match("^@set_(.+)")] or ref.class and ref.class[k]
         else
             return _get(o, k)
         end
     end,
     __newindex = function(o, k, v)
         local ref = instances[o]
-        if type(k) ~= "string" then 
-            local meta = getMetamethod(o, "set")
-            if meta then
-                meta(o, k, v)
-            else
-                rawset(o, k, v)
-            end
-        elseif k:match("^__") then
+        if type(k) == "string" and k:match("^__") then
             local name = k:sub(3)
-            if not metamethods[name] then
+            if not metamethods[name] and not operators[name] then
                 error(("Unsupported metamethod: %q"):format(name), 2)
             end
             if type(v) ~= "function" then
                 error(("Metamethod must be a function (got: %s)"):format(type(v)), 2)
             end
             o:meta(name, v)
-        elseif k:match("^@get_(.+)") then
+        elseif type(k) == "string" and k:match("^@get_(.+)") then
             local name = k:match("^@get_(.+)")
             if not name:match("^[%a][_%w]*$") then
                 error(("Invalid property name: %q (must start with a letter and contain only letters, numbers and underscores)"):format(name), 2)
@@ -294,7 +305,7 @@ local objectMt = {
                 error(("Property getter must be a function (got: %s)"):format(type(v)), 2)
             end
             o:getter(name, v)
-        elseif k:match("^@set_(.+)") then
+        elseif type(k) == "string" and k:match("^@set_(.+)") then
             local name = k:match("^@set_(.+)")
             if not name:match("^[%a][_%w]*$") then
                 error(("Invalid property name: %q (must start with a letter and contain only letters, numbers and underscores)"):format(name), 2)
@@ -309,36 +320,29 @@ local objectMt = {
             _set(o, k, v)
         end
     end,
-    __metatable = false
+    __metatable = {}
 }
 
-for name, metamethod in pairs(metamethods) do
-    if metamethod ~= "index" and metamethod ~= "newindex" then
-        objectMt["__" .. metamethod] = function(o, ...)
-            local meta = getMetamethod(o, name)
-            if meta then
-                return meta(o, ...)
-            end
-            if metamethod == "tostring" then
-                return ("%s: %s"):format(o.class.name, instances[o].id)
-            end
-                        end
-                    end
-                end
-
 function class.construct(c, ...)
+    if c and not class.isClass(c) then
+        error(("Invalid class (got: %s)"):format(tostring(c)), 2)
+    end
     local obj = {}
+    local id = tostring(obj):match("table: (.+)") or tostring(obj)
     instances[obj] = {
-        id = tostring(obj):match("table: (.+)") or tostring(obj),
+        id = id,
         class = c,
         indexes = {},
         getters = {},
         setters = {},
         meta = {}
     }
+    ids[id] = obj
     setmetatable(obj, objectMt)
     if type(obj.init) == "function" then
-        obj:init(...)
+        local s, e = pcall(obj.init, obj, ...)
+        if not s then error(e, 2) end
+        if c:isClassOf(e) then return e end
     end
     return obj
 end
@@ -346,34 +350,23 @@ end
 local classMt = {
     __index = function(c, k)
         local ref = classes[c]
-        if type(k) ~= "string" then 
-            local meta = getMetamethod(c, "get")
-            if meta then
-                return meta(c, k)
-            end
-            return rawget(c, k)
-        elseif k == "name" or k == "id" or k == "super" or k == "indexes" then
+        if k == "name" or k == "id" or k == "super" or k == "indexes" then
             return ref[k]
-        elseif k:match("^__") then
+        elseif type(k) == "string" and k:match("^__") then
             return getMetamethod(c, k:sub(3))
-        elseif k:match("^@get_(.+)") and ref.getters[k:match("^@get_(.+)")] then
-            return ref.getters[k:match("^@get_(.+)")]
-        elseif k:match("^@set_(.+)") and ref.setters[k:match("^@set_(.+)")] then
-            return ref.setters[k:match("^@set_(.+)")]
+        elseif type(k) == "string" and k:match("^@get_(.+)") and ref.getters[k:match("^@get_(.+)")] then
+            return ref.getters[k:match("^@get_(.+)")] or ref.super and ref.super[k]
+        elseif type(k) == "string" and k:match("^@set_(.+)") and ref.setters[k:match("^@set_(.+)")] then
+            return ref.setters[k:match("^@set_(.+)")] or ref.super and ref.super[k]
+        elseif ids[k] and ids[k].class == c then
+            return ids[k]
         else
-            return _index(ref.indexes, c, k) or (ref.super and ref.super[k]) or class[k]
+            return _get(c, k)
         end
     end,
     __newindex = function(c, k, v)
         local ref = classes[c]
-        if type(k) ~= "string" then 
-            local meta = getMetamethod(c, "set")
-            if meta then
-                meta(c, k, v)
-            else
-                rawset(c, k, v)
-            end
-        elseif k == "name" then
+        if k == "name" then
             if type(v) == "string" then
                 if named[v] then
                     error(("A class named %q already exists"):format(v), 2)
@@ -391,18 +384,18 @@ local classMt = {
             else
                 error(("Invalid value for class name (got: %s (%s))"):format(tostring(v), type(v)), 2)
             end
-        elseif ref[k] or ref.getters[k] or ref.setters[k] or class[k] then
+        elseif ref[k] then
             error(("Cannot override the %q field"):format(tostring(k)), 2)
-        elseif k:match("^__") then
+        elseif type(k) == "string" and k:match("^__") then
             local name = k:sub(3)
-            if not metamethods[name] then
+            if not metamethods[name] and not operators[name] then
                 error(("Unsupported metamethod: %q"):format(name), 2)
             end
             if type(v) ~= "function" then
                 error(("Metamethod must be a function (got: %s)"):format(type(v)), 2)
             end
             c:meta(name, v)
-        elseif k:match("^@get_(.+)") then
+        elseif type(k) == "string" and k:match("^@get_(.+)") then
             local name = k:match("^@get_(.+)")
             if not name:match("^[%a][_%w]*$") then
                 error(("Invalid property name: %q (must start with a letter and contain only letters, numbers and underscores)"):format(name), 2)
@@ -411,7 +404,7 @@ local classMt = {
                 error(("Property getter must be a function (got: %s)"):format(type(v)), 2)
             end
             c:getter(name, v)
-        elseif k:match("^@set_(.+)") then
+        elseif type(k) == "string" and k:match("^@set_(.+)") then
             local name = k:match("^@set_(.+)")
             if not name:match("^[%a][_%w]*$") then
                 error(("Invalid property name: %q (must start with a letter and contain only letters, numbers and underscores)"):format(name), 2)
@@ -421,7 +414,7 @@ local classMt = {
             end
             c:setter(name, v)
         else
-            rawset(c, k, v)
+            _set(c, k, v)
         end
     end,
     __metatable = {},
@@ -433,14 +426,124 @@ local classMt = {
 }
 
 for name, metamethod in pairs(metamethods) do
-    if metamethod ~= "index" and metamethod ~= "newindex" and metamethod ~= "tostring" and metamethod ~= "call" then
-        classMt["__" .. metamethod] = function(c, ...)
-            local meta = getMetamethod(c, name)
+    if metamethod ~= "index" and metamethod ~= "newindex" then
+        objectMt["__" .. metamethod] = function(o, ...)
+            local meta = getMetamethod(o, name)
             if meta then
-                return meta(c, ...)
+                local s, e = pcall(meta, o, ...)
+                if not s then error(e, 2) end
+                return e
             end
+            if metamethod == "tostring" then
+                local className = o.class and o.class.name or "object"
+                return ("%s: %s"):format(className, o.id)
+            end
+            error(("Metamethod %q is not defined for %s"):format(name, tostring(o)), 2)
         end
     end
+end
+
+for name, operator in pairs(operators) do
+    objectMt["__" .. operator] = function(a, b)
+        local metaA, metaB = getMetamethod(a, name), getMetamethod(b, name)
+        if metaA then
+            local s, e = pcall(metaA, a, b)
+            if not s then error(e, 2) end
+            if e ~= nil then return e end
+        end
+        if metaB then
+            local s, e = pcall(metaB, a, b)
+            if not s then error(e, 2) end
+            if e ~= nil then return e end
+        end
+        if name ~= "equals" and name ~= "lessthan" and name ~= "lessequal" then
+            error(("Metamethod %q defined for %s and %s"):format(name, tostring(a), tostring(b)), 2)
+        end
+    end
+end
+
+function class.derive(super, name)
+    if tostring(super) == "<FLOOF class module>" then
+        super = nil
+    end
+    if super and not class.isClass(super) then
+        error(("Superclass must be a class (got: %s)"):format(tostring(super)), 2)
+    end
+    if name and type(name) ~= "string" then
+        error(("Class name must be a string (got: %s)"):format(type(name)), 2)
+    end
+    local c = {}
+    if name then
+        if named[name] then
+            error(("A class named %q already exists"):format(name), 2)
+        elseif class[k] then
+            error(("Invalid class name: %q. Please choose a different name"):format(name), 2)
+        else
+            named[name] = c
+        end
+    end
+    classes[c] = {
+        id = tostring(c):match("table: (.+)") or tostring(c),
+        name = name,
+        super = super,
+        getters = {},
+        setters = {},
+        indexes = {},
+        meta = {}
+    }
+    setmetatable(c, classMt)
+    if type(c.setup) == "function" then
+        local s, e = pcall(c.setup, c)
+        if not s then error(e, 2) end
+    end
+    return c
+end
+
+function class.clone(obj)
+    if not class.isInstance(obj) then
+        error(("Invalid object: %s"):format(tostring(obj)), 2)
+    end
+    
+    local ref = instances[obj]
+    local clone = {}
+    
+    -- Create new instance reference
+    instances[clone] = {
+        id = tostring(clone):match("table: (.+)") or tostring(clone),
+        class = ref.class,
+        indexes = {},
+        getters = {},
+        setters = {},
+        meta = {}
+    }
+
+    -- Copy all raw fields
+    for k, v in pairs(obj) do
+        rawset(clone, k, v)
+    end
+    
+    -- Copy indexes (shallow copy)
+    for i, index in ipairs(ref.indexes) do
+        instances[clone].indexes[i] = index
+    end
+    
+    -- Copy getters and setters
+    for k, v in pairs(ref.getters) do
+        instances[clone].getters[k] = v
+    end
+    for k, v in pairs(ref.setters) do
+        instances[clone].setters[k] = v
+    end
+    
+    -- Copy metamethods
+    for k, v in pairs(ref.meta) do
+        instances[clone].meta[k] = v
+    end
+    
+    -- Set metatable
+    setmetatable(clone, objectMt)
+    
+    return clone
 end
 
 return setmetatable({}, {
@@ -448,43 +551,5 @@ return setmetatable({}, {
     __newindex = function() end,
     __metatable = {},
     __tostring = function() return "<FLOOF class module>" end,
-    __call = function(_, name, super, c)
-        if name and type(name) ~= "string" then
-            super, c, name = name, super
-        end
-        if super and not class.isClass(super) then
-            c, super = super
-        end
-        c = type(c) == "table" and c or {}
-        if not pcall(setmetatable, c, nil) then
-            error("Classes with custom metatables are not supported. If you want to implement an indexing metatable/metamethod, use the 'indexes' field", 2)
-        end
-        if name then
-            if named[name] then
-                error(("A class named %q already exists"):format(name), 2)
-            elseif class[k] then
-                error(("Invalid class name: %q. Please choose a different name"):format(name), 2)
-            else
-                named[name] = c
-            end
-        end
-        local ref = {
-            id = tostring(c):match("table: (.+)") or tostring(c),
-            name = name,
-            super = super,
-            getters = {},
-            setters = {},
-            indexes = {},
-            meta = {}
-        }
-        classes[c] = ref
-        local data = {}
-        for k, v in pairs(c) do data[k], c[k] = v end
-        setmetatable(c, classMt)
-        for k, v in pairs(data) do
-            local s, e = pcall(function() c[k] = v end)
-            if not s then error(e, 2) end
-        end
-        return c
-    end
+    __call = class.derive
 })

@@ -10,6 +10,6 @@ return setmetatable({}, {
     __metatable = {},
     __tostring = function() return "<FLOOF main module>" end,
     __call = function(self)
-        self.object.setup()
+        self.object.registerCallbacks()
     end
 })
