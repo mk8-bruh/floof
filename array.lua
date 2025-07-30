@@ -194,6 +194,32 @@ function Array:search(func)
     end
 end
 
+function Array:min()
+    local min = math.huge
+    for i, v in ipairs(self) do
+        if type(v) ~= "number" then
+            error(("Array must not contain non-number values (got: %s)"):format(class.getClass(v) and class.getClass(v).name or type(v)), 2)
+        end
+        if v < min then
+            min = v
+        end
+    end
+    return min
+end
+
+function Array:max()
+    local max = -math.huge
+    for i, v in ipairs(self) do
+        if type(v) ~= "number" then
+            error(("Array must not contain non-number values (got: %s)"):format(class.getClass(v) and class.getClass(v).name or type(v)), 2)
+        end
+        if v > max then
+            max = v
+        end
+    end
+    return max
+end
+
 function Array:range(start, stop, step)
     if not stop then
         stop = start
@@ -217,6 +243,17 @@ end
 
 Array:getter("length", function(self)   
     return self._length
+end)
+
+Array:getter("empty", function(self)
+    return self.length == 0
+end)
+
+Array:getter("full", function(self)
+    for i, v in ipairs(self) do
+        if v == nil then return false end
+    end
+    return true
 end)
 
 Array:meta("get", function(self, k)

@@ -4,7 +4,8 @@ return setmetatable({}, {
     __index = {
         class = require(PATH .. "class"),
         object = require(PATH .. "object"),
-        array = require(PATH .. "array")
+        array = require(PATH .. "array"),
+        vector = require(PATH .. "vector")
     },
     __newindex = function() end,
     __metatable = {},
