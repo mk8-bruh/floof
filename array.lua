@@ -220,6 +220,28 @@ function Array:max()
     return max
 end
 
+function Array:sum()
+    local sum = 0
+    for i, v in ipairs(self) do
+        if type(v) ~= "number" then
+            error(("Array must not contain non-number values (got: %s)"):format(class.getClass(v) and class.getClass(v).name or type(v)), 2)
+        end
+        sum = sum + v
+    end
+    return sum
+end
+
+function Array:average()
+    local sum = 0
+    for i, v in ipairs(self) do
+        if type(v) ~= "number" then
+            error(("Array must not contain non-number values (got: %s)"):format(class.getClass(v) and class.getClass(v).name or type(v)), 2)
+        end
+        sum = sum + v
+    end
+    return sum / self.length
+end
+
 function Array:range(start, stop, step)
     if not stop then
         stop = start
@@ -246,11 +268,14 @@ Array:getter("length", function(self)
 end)
 
 Array:getter("empty", function(self)
-    return self.length == 0
+    for i, v in self:iterate() do
+        if v ~= nil then return false end
+    end
+    return true
 end)
 
 Array:getter("full", function(self)
-    for i, v in ipairs(self) do
+    for i, v in self:iterate() do
         if v == nil then return false end
     end
     return true
