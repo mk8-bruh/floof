@@ -1,4 +1,5 @@
-PATH = (...):match("^(.+%.).-$") or ""
+local PATH = (...):match("^(.+)$")
+PATH = PATH and PATH .. "." or ""
 
 return setmetatable({}, {
     __index = {

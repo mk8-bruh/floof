@@ -1,4 +1,5 @@
-local class = require("class")
+local PATH = (...):match("^(.+%.).-$") or ""
+local class = require(PATH .. "class")
 
 -- Aliases
 local floor = math.floor

@@ -25,7 +25,7 @@ FLOOF helps you build your game using clean, modular Lua code. With built-in sup
 ## 📦 Installation
 
 ```bash
-git clone https://github.com/yourusername/floof.git
+git clone https://github.com/mk8-bruh/floof.git
 ```
 
 Place the `floof/` directory in your project, and require the core modules as needed:
