@@ -1,5 +1,6 @@
-local class = require("class")
-local Array = require("array")
+local PATH = (...):match("^(.+%.).-$") or ""
+local class = require(PATH .. "class")
+local array = require(PATH .. "array")
 
 local emptyf = function(...) return end
 
@@ -95,12 +96,12 @@ function Object:init(data)
     self.callbacks = {}
     
     self._parent = nil
-    self._children = Array()
+    self._children = array()
     self._childRegister = {}
     self._z = 0
     self._enabled = true
     self._active = nil
-    self._presses = Array()
+    self._presses = array()
     self._pressedObject = {}
     self._check = nil
     self._lastHovered = nil
@@ -323,7 +324,7 @@ function Object:updateChildStatus(object)
 end
 
 function Object:refreshChildren()
-    self._children = Array()
+    self._children = array()
     for c in pairs(self._childRegister) do
         self._children:append(c)
     end
@@ -421,6 +422,19 @@ function Object:broadcast(message, ...)
             end
             child:broadcast(message, ...)
         end
+    end
+end
+
+function Object:broadcastActive(message, ...)
+    if Object[message] then
+        error(("Cannot broadcast reserved message: %q"):format(message), 2)
+    end
+
+    if self.activeChild and self.activeChild.isEnabled then
+        if type(self.activeChild[message]) == "function" then
+            self.activeChild[message](self.activeChild, ...)
+        end
+        self.activeChild:broadcastActive(message, ...)
     end
 end
 

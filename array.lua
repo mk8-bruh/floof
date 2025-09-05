@@ -1,6 +1,7 @@
-local class = require("class")
+local PATH = (...):match("^(.+%.).-$") or ""
+local class = require(PATH .. "class")
 
-local ntostr = function(n) 
+local ntostr = function(n)
     return tostring(n):match("^(.-%..-)0000.*$") or tostring(n) 
 end
 
@@ -150,16 +151,6 @@ function Array:reversed()
     return self:copy():reverse()
 end
 
-function Array:map(func)
-    return self:foreach(function(v, i, self)
-        self[i] = func(v, i, self)
-    end)
-end
-
-function Array:mapped(func)
-    return self:copy():map(func)
-end
-
 function Array:filter(func)
     for i = self.length, 1, -1 do
         if not func(self[i], i, self) then
@@ -171,6 +162,21 @@ end
 
 function Array:filtered(func)
     return self:copy():filter(func)
+end
+
+function Array:map(func)
+    for i = self.length, 1, -1 do
+        local res = array(func(self[i], i, self))
+        self:pop(i)
+        for j, v in res:iterate() do
+            self:push(v, i + j - 1)
+        end
+    end
+    return self
+end
+
+function Array:mapped(func)
+    return self:copy():map(func)
 end
 
 function Array:reduce(func, value)
