@@ -669,8 +669,11 @@ Object.checks = {
 Object.checks.default = Object.checks.cornerRect
 
 -- LÖVE callback setup function
-function Object.registerCallbacks()
+function Object.registerCallbacks(root)
     if not love then return end
+    if root and not Object:isClassOf(root) then
+        error(("Invalid root object: %s (%s)"):format(tostring(root), type(root)), 3)
+    end
     
     local emptyf = function(...) return end
     
@@ -681,25 +684,25 @@ function Object.registerCallbacks()
     
     for _, f in ipairs(Object.blockingCallbackNames) do
         love[f] = function(...)
-            return Object.root and Object.root[f](Object.root, ...) or old[f](...)
+            return (root or Object.root) and (root or Object.root)[f]((root or Object.root), ...) or old[f](...)
         end
     end
     
     for _, f in ipairs{"resize", "update", "draw", "quit"} do
         love[f] = function(...)
             old[f](...)
-            if Object.root then
-                Object.root[f](Object.root, ...)
+            if (root or Object.root) then
+                (root or Object.root)[f]((root or Object.root), ...)
             end
         end
     end
     
     love.mousepressed = function(...)
         local x, y, b, t = ...
-        if b and not t and Object.root then
-            Object.root:keypressed(("mouse%d"):format(b))
+        if b and not t and (root or Object.root) then
+            (root or Object.root):keypressed(("mouse%d"):format(b))
         end
-        if b and not t and Object.root and Object.root:check(x, y) and Object.root:pressed(x, y, b) ~= false then
+        if b and not t and (root or Object.root) and (root or Object.root):check(x, y) and (root or Object.root):pressed(x, y, b) ~= false then
             return
         end
         old.mousepressed(...)
@@ -707,15 +710,15 @@ function Object.registerCallbacks()
     
     love.mousemoved = function(...)
         local x, y, dx, dy, t = ...
-        if love and love.mouse and love.mouse.getRelativeMode() and Object.root then
-            Object.root:mousedelta(dx, dy)
+        if love and love.mouse and love.mouse.getRelativeMode() and (root or Object.root) then
+            (root or Object.root):mousedelta(dx, dy)
             return
         end
-        if not t and Object.root then
+        if not t and (root or Object.root) then
             local r = false
-            for i, b in ipairs(Object.root.presses) do
+            for i, b in ipairs((root or Object.root).presses) do
                 if type(b) == "number" then
-                    if Object.root:moved(x, y, dx, dy, b) then
+                    if (root or Object.root):moved(x, y, dx, dy, b) then
                         r = true
                     end
                 end
@@ -729,13 +732,13 @@ function Object.registerCallbacks()
     
     love.mousereleased = function(...)
         local x, y, b, t = ...
-        if b and not t and Object.root then
-            Object.root:keyreleased(("mouse%d"):format(b))
+        if b and not t and (root or Object.root) then
+            (root or Object.root):keyreleased(("mouse%d"):format(b))
         end
-        if b and not t and Object.root then
-            for i, press in ipairs(Object.root.presses) do
+        if b and not t and (root or Object.root) then
+            for i, press in ipairs((root or Object.root).presses) do
                 if press == b then
-                    Object.root:released(x, y, b)
+                    (root or Object.root):released(x, y, b)
                     return
                 end
             end
@@ -745,12 +748,12 @@ function Object.registerCallbacks()
     
     love.wheelmoved = function(...)
         local x, y = ...
-        return Object.root and Object.root.isHovered and Object.root:scrolled(y) or old.wheelmoved(...)
+        return (root or Object.root) and (root or Object.root).isHovered and (root or Object.root):scrolled(y) or old.wheelmoved(...)
     end
     
     love.touchpressed = function(...)
         local id, x, y = ...
-        if Object.root and Object.root:check(x, y) and Object.root:pressed(x, y, id) ~= false then
+        if (root or Object.root) and (root or Object.root):check(x, y) and (root or Object.root):pressed(x, y, id) ~= false then
             return
         end
         old.touchpressed(...)
@@ -758,10 +761,10 @@ function Object.registerCallbacks()
     
     love.touchmoved = function(...)
         local id, x, y, dx, dy = ...
-        if Object.root then
-            for i, press in ipairs(Object.root.presses) do
+        if (root or Object.root) then
+            for i, press in ipairs((root or Object.root).presses) do
                 if press == id then
-                    if Object.root:moved(x, y, dx, dy, id) then
+                    if (root or Object.root):moved(x, y, dx, dy, id) then
                         return
                     end
                     break
@@ -773,10 +776,10 @@ function Object.registerCallbacks()
     
     love.touchreleased = function(...)
         local id, x, y = ...
-        if Object.root then
-            for i, press in ipairs(Object.root.presses) do
+        if (root or Object.root) then
+            for i, press in ipairs((root or Object.root).presses) do
                 if press == id then
-                    Object.root:released(x, y, id)
+                    (root or Object.root):released(x, y, id)
                     return
                 end
             end
@@ -806,11 +809,13 @@ function Object:serialize(indent)
     end
     local c = self.class
     while c do
-        if c.serializeFields then
-            for i, f in ipairs(c.serializeFields) do
-                local value = self[f]
-                if value ~= nil then
-                    str = str .. ("\n%s%s: %s"):format(ind, f, tostring(value))
+        if Array:isClassOf(c.serializeFields) then
+            for i, f in c.serializeFields:iterate() do
+                if type(f) == "string" then
+                    local value = self[f]
+                    if value ~= nil then
+                        str = str .. ("\n%s%s: %s"):format(ind, f, tostring(value))
+                    end
                 end
             end
         end
