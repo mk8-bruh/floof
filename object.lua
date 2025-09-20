@@ -19,7 +19,7 @@ Object.callbackNames = {
     "gamepadaxis", "gamepadpressed", "gamepadreleased",
     "created", "deleted", "added", "removed", "addedto", "removedfrom",
     "activated", "deactivated", "childactivated", "childdeactivated",
-    "enabled", "disabled",
+    "enabled", "disabled", "enter", "leave",
 }
 
 Object.activeCallbackNames = {
@@ -60,22 +60,26 @@ for i, n in ipairs(Object.activeCallbackNames) do
 end
 
 -- Root object reference
-Object.root = nil
+Object._root = nil
 
-function Object.setRoot(obj)
+function Object.__get_root(self)
+    return Object._root
+end
+
+function Object.setRoot(obj, ...)
     if obj ~= nil and not Object:isClassOf(obj) then
         error(("Invalid object (got: %s (%s))"):format(tostring(obj), type(obj)), 2)
     end
-    if Object.root then
-        -- cancel all presses
-        for i, p in ipairs(Object.root.presses) do
-            Object.root:cancelled(p)
+    local previous = Object._root
+    if previous then
+        for i, p in ipairs(previous.presses) do
+            previous:cancelled(p)
         end
-        Object.root:deactivated()
+        previous:leave(obj, ...)
     end
-    Object.root = obj
+    Object._root = obj
     if obj then
-        obj:activated()
+        obj:enter(previous, ...)
     end
 end
 
@@ -216,7 +220,6 @@ end
 function Object:moved(x, y, dx, dy, id)
     if self._pressedObject[id] then
         if self._pressedObject[id]:moved(x, y, dx, dy, id) ~= true and not self._pressedObject[id]:check(x, y) then
-            -- object should no longer be pressed
             self:setPressTarget(id)
         end
         return true
@@ -398,52 +401,44 @@ function Object:setParent(parent)
 end
 
 -- Messaging system
-function Object:send(message, ...)
-    if Object[message] then
-        error(("Cannot send reserved message: %q"):format(message), 2)
+function Object:call(message, ...)
+    if type(self[message]) == "function" then
+        return self[message](self, ...)
     end
-    
+end
+
+function Object:send(message, ...)
     for i, child in ipairs(self._children) do
-        if child.isEnabled and type(child[message]) == "function" then
-            child[message](child, ...)
+        if child.isEnabled then
+            child:call(message, ...)
         end
     end
 end
 
 function Object:broadcast(message, ...)
-    if Object[message] then
-        error(("Cannot broadcast reserved message: %q"):format(message), 2)
-    end
-    
     for i, child in ipairs(self._children) do
         if child.isEnabled then
-            if type(child[message]) == "function" then
-                child[message](child, ...)
+            if child:call(message, ...) ~= false then
+                child:broadcast(message, ...)
             end
-            child:broadcast(message, ...)
         end
     end
 end
 
 function Object:broadcastActive(message, ...)
-    if Object[message] then
-        error(("Cannot broadcast reserved message: %q"):format(message), 2)
-    end
-
     if self.activeChild and self.activeChild.isEnabled then
-        if type(self.activeChild[message]) == "function" then
-            self.activeChild[message](self.activeChild, ...)
+        if self.activeChild:call(message, ...) ~= false then
+            self.activeChild:broadcastActive(message, ...)
         end
-        self.activeChild:broadcastActive(message, ...)
     end
 end
 
 -- Property getters and setters
-Object:getter("parent", function(self)
+Object.__get_parent = function(self)
     return self._parent
-end)
+end
 
-Object:setter("parent", function(self, value)
+Object.__set_parent = function(self, value)
     if self._parent == value then return end
     if value ~= nil and not Object:isClassOf(value) then
         error(("Parent must be an object (got: %s (%s))"):format(tostring(value), type(value)), 3)
@@ -480,25 +475,25 @@ Object:setter("parent", function(self, value)
         value:added(self)
         self:addedto(value)
     end
-end)
+end
 
-Object:getter("z", function(self)
+Object.__get_z = function(self)
     return self._z
-end)
+end
 
-Object:setter("z", function(self, value)
+Object.__set_z = function(self, value)
     if type(value) ~= "number" then
         error(("Z value must be a number (got: %s (%s))"):format(tostring(value), type(value)), 3)
     end
     self._z = value
     if self._parent then self._parent:refreshChildren() end
-end)
+end
 
-Object:getter("enabledSelf", function(self)
+Object.__get_enabledSelf = function(self)
     return self._enabled
-end)
+end
 
-Object:setter("enabledSelf", function(self, value)
+Object.__set_enabledSelf = function(self, value)
     if type(value) ~= "boolean" then
         error(("Enabled state must be a boolean value (got: %s (%s))"):format(tostring(value), type(value)), 3)
     end
@@ -506,29 +501,30 @@ Object:setter("enabledSelf", function(self, value)
     self._enabled = value
     if value then
         self:enabled()
+        self:broadcast("enabled")
     else
         self:disabled()
+        self:broadcast("disabled")
         for i, p in ipairs(self._presses) do
             self:cancelled(p)
             self._parent:setPressTarget(p)
         end
     end
-end)
-
-Object:getter("isEnabled", function(self)
+end
+Object.__get_isEnabled = function(self)
     if not self._enabled then
         return false
     elseif self._parent then
         return self._parent.isEnabled
     end
     return true
-end)
+end
 
-Object:getter("activeChild", function(self)
+Object.__get_activeChild = function(self)
     return self._active
-end)
+end
 
-Object:setter("activeChild", function(self, value)
+Object.__set_activeChild = function(self, value)
     if self._active == value then return end
     if not Object:isClassOf(value) and value ~= nil then
         error(("Active child must be an object (got: %s (%s))"):format(tostring(value), type(value)), 3)
@@ -546,9 +542,9 @@ Object:setter("activeChild", function(self, value)
         value:activated()
         self:childactivated(value)
     end
-end)
+end
 
-Object:getter("isActive", function(self)
+Object.__get_isActive = function(self)
     if self == Object.root then return true end
     local e = self._parent
     while e do
@@ -559,9 +555,9 @@ Object:getter("isActive", function(self)
         e = e._parent
     end
     return false
-end)
+end
 
-Object:getter("hoveredChild", function(self)
+Object.__get_hoveredChild = function(self)
     if not self.isHovered then return end
     if love and love.mouse then
         local x, y = love.mouse.getPosition()
@@ -571,16 +567,16 @@ Object:getter("hoveredChild", function(self)
             end
         end
     end
-end)
+end
 
-Object:getter("isHovered", function(self)
+Object.__get_isHovered = function(self)
     if self == Object.root then
         return love and love.mouse and self:check(love.mouse.getPosition())
     end
     return self._parent and self._parent.isHovered and self._parent.hoveredChild == self or false
-end)
+end
 
-Object:getter("pressedObject", function(self)
+Object.__get_pressedObject = function(self)
     return setmetatable({}, {
         __index = self._pressedObject,
         __newindex = function(t, k, v)
@@ -596,23 +592,23 @@ Object:getter("pressedObject", function(self)
             self:setPressTarget(k, v)
         end
     })
-end)
+end
 
-Object:getter("children", function(self)
+Object.__get_children = function(self)
     return self._children:copy()
-end)
+end
 
-Object:getter("presses", function(self)
+Object.__get_presses = function(self)
     return self._presses:copy()
-end)
+end
 
-Object:getter("press", function(self)
+Object.__get_press = function(self)
     return self._presses[-1]
-end)
+end
 
-Object:getter("isPressed", function(self)
+Object.__get_isPressed = function(self)
     return self._presses.length > 0
-end)
+end
 
 -- Check function
 function Object:check(x, y)
@@ -625,7 +621,7 @@ function Object:check(x, y)
     end
 end
 
-Object:setter("check", function(self, value)
+Object.__set_check = function(self, value)
     if type(value) == "boolean" then
         value = function() return value end
     end
@@ -633,11 +629,11 @@ Object:setter("check", function(self, value)
         error(("Check function must be a function (got: %s (%s))"):format(tostring(value), type(value)), 3)
     end
     self._check = value
-end)
+end
 
-Object:getter("check", function(self)
+Object.__get_check = function(self)
     return Object.check
-end)
+end
 
 -- Pre-defined checking functions
 Object.checks = {
@@ -803,15 +799,13 @@ function Object.registerCallbacks(root)
 end
 
 Object.serializeFields = {
-    "z", "parent", "isPressed", "presses",
-    "isEnabled", "enabledSelf", "isActive", "isHovered",
-    "activeChild", "hoveredChild", "children"
+    "z", "isPressed", "enabledSelf", "children"
 }
 
 Object.serializeIndent = 4
 
 function Object:serialize(indent)
-    local str = tostring(self) .. ":"
+    local str = string.rep(" ", Object.serializeIndent * (indent or 0)) .. tostring(self) .. ":"
     local ind = string.rep(" ", Object.serializeIndent * ((indent or 0) + 1))
     if rawget(self, "serializeFields") then
         for i, f in ipairs(self.serializeFields) do
@@ -838,6 +832,6 @@ function Object:serialize(indent)
     return str
 end
 
-Object.root = Object({check = true})
+Object.setRoot(Object({check = true}))
 
 return Object

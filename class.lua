@@ -13,9 +13,9 @@ local function _index(indexes, t, k, visited)
         if type(index) == "table" then
             v = index[k]
         elseif type(index) == "function" then
-            local s, e = pcall(index, t, k)
+            local s, e = xpcall(index, debug.traceback, t, k)
             if not s then
-                error(("Error while trying to access field %q of index #%d [%s]: %s"):format(k, i, tostring(index), e), 3)
+                error(("Error while trying to access field %q of index #%d [%s]:\n%s"):format(k, i, tostring(index), e), 3)
             else
                 v = e
             end
@@ -275,19 +275,39 @@ local objectMt = {
         local ref = instances[o]
         if k == "id" or k == "class" or k == "indexes" then
             return ref[k]
+        elseif type(k) == "string" and k:match("^__get_(.+)") then
+            local name = k:match("^__get_(.+)")
+            return ref.getters[name] or (ref.class and ref.class[k]) or function(o) return o[name] end
+        elseif type(k) == "string" and k:match("^__set_(.+)") then
+            local name = k:match("^__set_(.+)")
+            return ref.setters[name] or (ref.class and ref.class[k]) or function(o, v) o[name] = v end
         elseif type(k) == "string" and k:match("^__") then
             return getMetamethod(o, k:sub(3))
-        elseif type(k) == "string" and k:match("^@get_(.+)") and ref.getters[k:match("^@get_(.+)")] then
-            return ref.getters[k:match("^@get_(.+)")] or ref.class and ref.class[k]
-        elseif type(k) == "string" and k:match("^@set_(.+)") and ref.setters[k:match("^@set_(.+)")] then
-            return ref.setters[k:match("^@set_(.+)")] or ref.class and ref.class[k]
         else
             return _get(o, k)
         end
     end,
     __newindex = function(o, k, v)
         local ref = instances[o]
-        if type(k) == "string" and k:match("^__") then
+        if type(k) == "string" and k:match("^__get_(.+)") then
+            local name = k:match("^__get_(.+)")
+            if not name:match("^[%a][_%w]*$") then
+                error(("Invalid property name: %q (must start with a letter and contain only letters, numbers and underscores)"):format(name), 2)
+            end
+            if type(v) ~= "function" then
+                error(("Property getter must be a function (got: %s)"):format(type(v)), 2)
+            end
+            o:getter(name, v)
+        elseif type(k) == "string" and k:match("^__set_(.+)") then
+            local name = k:match("^__set_(.+)")
+            if not name:match("^[%a][_%w]*$") then
+                error(("Invalid property name: %q (must start with a letter and contain only letters, numbers and underscores)"):format(name), 2)
+            end
+            if type(v) ~= "function" then
+                error(("Property setter must be a function (got: %s)"):format(type(v)), 2)
+            end
+            o:setter(name, v)
+        elseif type(k) == "string" and k:match("^__") then
             local name = k:sub(3)
             if not metamethods[name] and not operators[name] then
                 error(("Unsupported metamethod: %q"):format(name), 2)
@@ -296,24 +316,6 @@ local objectMt = {
                 error(("Metamethod must be a function (got: %s)"):format(type(v)), 2)
             end
             o:meta(name, v)
-        elseif type(k) == "string" and k:match("^@get_(.+)") then
-            local name = k:match("^@get_(.+)")
-            if not name:match("^[%a][_%w]*$") then
-                error(("Invalid property name: %q (must start with a letter and contain only letters, numbers and underscores)"):format(name), 2)
-            end
-            if type(v) ~= "function" then
-                error(("Property getter must be a function (got: %s)"):format(type(v)), 2)
-            end
-            o:getter(name, v)
-        elseif type(k) == "string" and k:match("^@set_(.+)") then
-            local name = k:match("^@set_(.+)")
-            if not name:match("^[%a][_%w]*$") then
-                error(("Invalid property name: %q (must start with a letter and contain only letters, numbers and underscores)"):format(name), 2)
-            end
-            if type(v) ~= "function" then
-                error(("Property setter must be a function (got: %s)"):format(type(v)), 2)
-            end
-            o:setter(name, v)
         elseif ref[k] then
             error(("Cannot modify the %q field"):format(k), 2)
         else
@@ -340,9 +342,9 @@ function class.construct(c, ...)
     ids[id] = obj
     setmetatable(obj, objectMt)
     if type(obj.init) == "function" then
-        local s, e = pcall(obj.init, obj, ...)
+        local s, e = xpcall(obj.init, debug.traceback, obj, ...)
         if not s then error(e, 2) end
-        if c:isClassOf(e) then return e end
+        if c and c:isClassOf(e) then return e end
     end
     return obj
 end
@@ -352,12 +354,14 @@ local classMt = {
         local ref = classes[c]
         if k == "name" or k == "id" or k == "super" or k == "indexes" then
             return ref[k]
+        elseif type(k) == "string" and k:match("^__get_(.+)") and ref.getters[k:match("^__get_(.+)")] then
+            local name = k:match("^__get_(.+)")
+            return ref.getters[name] or (ref.super and ref.super[k]) or function(o) return o[name] end
+        elseif type(k) == "string" and k:match("^__set_(.+)") and ref.setters[k:match("^__set_(.+)")] then
+            local name = k:match("^__set_(.+)")
+            return ref.setters[name] or (ref.super and ref.super[k]) or function(o, v) o[name] = v end
         elseif type(k) == "string" and k:match("^__") then
             return getMetamethod(c, k:sub(3))
-        elseif type(k) == "string" and k:match("^@get_(.+)") and ref.getters[k:match("^@get_(.+)")] then
-            return ref.getters[k:match("^@get_(.+)")] or ref.super and ref.super[k]
-        elseif type(k) == "string" and k:match("^@set_(.+)") and ref.setters[k:match("^@set_(.+)")] then
-            return ref.setters[k:match("^@set_(.+)")] or ref.super and ref.super[k]
         elseif ids[k] and ids[k].class == c then
             return ids[k]
         else
@@ -386,6 +390,24 @@ local classMt = {
             end
         elseif ref[k] then
             error(("Cannot override the %q field"):format(tostring(k)), 2)
+        elseif type(k) == "string" and k:match("^__get_(.+)") then
+            local name = k:match("^__get_(.+)")
+            if not name:match("^[%a][_%w]*$") then
+                error(("Invalid property name: %q (must start with a letter and contain only letters, numbers and underscores)"):format(name), 2)
+            end
+            if type(v) ~= "function" then
+                error(("Property getter must be a function (got: %s)"):format(type(v)), 2)
+            end
+            c:getter(name, v)
+        elseif type(k) == "string" and k:match("^__set_(.+)") then
+            local name = k:match("^__set_(.+)")
+            if not name:match("^[%a][_%w]*$") then
+                error(("Invalid property name: %q (must start with a letter and contain only letters, numbers and underscores)"):format(name), 2)
+            end
+            if type(v) ~= "function" then
+                error(("Property setter must be a function (got: %s)"):format(type(v)), 2)
+            end
+            c:setter(name, v)
         elseif type(k) == "string" and k:match("^__") then
             local name = k:sub(3)
             if not metamethods[name] and not operators[name] then
@@ -395,24 +417,6 @@ local classMt = {
                 error(("Metamethod must be a function (got: %s)"):format(type(v)), 2)
             end
             c:meta(name, v)
-        elseif type(k) == "string" and k:match("^@get_(.+)") then
-            local name = k:match("^@get_(.+)")
-            if not name:match("^[%a][_%w]*$") then
-                error(("Invalid property name: %q (must start with a letter and contain only letters, numbers and underscores)"):format(name), 2)
-            end
-            if type(v) ~= "function" then
-                error(("Property getter must be a function (got: %s)"):format(type(v)), 2)
-            end
-            c:getter(name, v)
-        elseif type(k) == "string" and k:match("^@set_(.+)") then
-            local name = k:match("^@set_(.+)")
-            if not name:match("^[%a][_%w]*$") then
-                error(("Invalid property name: %q (must start with a letter and contain only letters, numbers and underscores)"):format(name), 2)
-            end
-            if type(v) ~= "function" then
-                error(("Property setter must be a function (got: %s)"):format(type(v)), 2)
-            end
-            c:setter(name, v)
         else
             _set(c, k, v)
         end
@@ -430,7 +434,7 @@ for name, metamethod in pairs(metamethods) do
         objectMt["__" .. metamethod] = function(o, ...)
             local meta = getMetamethod(o, name)
             if meta then
-                local s, e = pcall(meta, o, ...)
+                local s, e = xpcall(meta, debug.traceback, o, ...)
                 if not s then error(e, 2) end
                 return e
             end
@@ -447,12 +451,12 @@ for name, operator in pairs(operators) do
     objectMt["__" .. operator] = function(a, b)
         local metaA, metaB = getMetamethod(a, name), getMetamethod(b, name)
         if metaA then
-            local s, e = pcall(metaA, a, b)
+            local s, e = xpcall(metaA, debug.traceback, a, b)
             if not s then error(e, 2) end
             if e ~= nil then return e end
         end
         if metaB then
-            local s, e = pcall(metaB, a, b)
+            local s, e = xpcall(metaB, debug.traceback, a, b)
             if not s then error(e, 2) end
             if e ~= nil then return e end
         end
@@ -462,8 +466,10 @@ for name, operator in pairs(operators) do
     end
 end
 
+local module = {}
+
 function class.derive(super, name)
-    if tostring(super) == "<FLOOF class module>" then
+    if super == module then
         super = nil
     end
     if super and not class.isClass(super) then
@@ -476,7 +482,7 @@ function class.derive(super, name)
     if name then
         if named[name] then
             error(("A class named %q already exists"):format(name), 2)
-        elseif class[k] then
+        elseif class[name] then
             error(("Invalid class name: %q. Please choose a different name"):format(name), 2)
         else
             named[name] = c
@@ -493,7 +499,7 @@ function class.derive(super, name)
     }
     setmetatable(c, classMt)
     if type(c.setup) == "function" then
-        local s, e = pcall(c.setup, c)
+        local s, e = xpcall(c.setup, debug.traceback, c)
         if not s then error(e, 2) end
     end
     return c
@@ -546,7 +552,7 @@ function class.clone(obj)
     return clone
 end
 
-return setmetatable({}, {
+return setmetatable(module, {
     __index = function(_, k) return class[k] or named[k] end,
     __newindex = function() end,
     __metatable = {},

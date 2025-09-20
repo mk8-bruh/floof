@@ -6,7 +6,8 @@ return setmetatable({}, {
         class = require(PATH .. "class"),
         object = require(PATH .. "object"),
         array = require(PATH .. "array"),
-        vector = require(PATH .. "vector")
+        vector = require(PATH .. "vector"),
+        element = require(PATH .. "element")
     },
     __newindex = function() end,
     __metatable = {},
