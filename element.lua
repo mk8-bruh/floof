@@ -1,1131 +1,394 @@
+-- FLOOF: Fast Lua Element-Oriented Framework
+-- Copyright (c) 2026 Matus Kordos
+
 local PATH = (...):match("^(.+%.).-$") or ""
-local Object = require(PATH .. "object")
-local array = require(PATH .. "array")
+local floof = require(PATH)
+local array, vec, Object = floof.array, floof.vector, floof.object
 
-local Element = Object:derive("Element")
+local Element = Object:class("Element")
 
-Element.directions    = array("vertical", "horizontal")
-Element.justifyModes  = array("start", "center", "end", "stretch","space", "even")
-Element.alignModes    = array("start", "center", "end", "stretch")
+-- function pre-defs
 
-function Element:init(data)
-    data = data or {}
+local dx, dy, dw, dh,
+      setx, sety, setw, seth,
+      cont
 
-    self._elements = array()
-    self.clip = data.clip
+local setSortOrder,
+      moveBefore, moveAfter,
+      setFirstChild, setLastChild,
+      iterElem, backIterElem,
+      iterElemCh, backIterElemCh,
+      previousActiveElem, nextActiveElem,
+      firstActiveChElem, lastActiveChElem,
+      hierPrevElem, hierNextElem,
+      hierElem, backHierElem
 
-    self.inLayout = data.inLayout
-    self.direction = data.direction
-    self.justify = data.justify
-    self.align = data.align
-    self.alignSelf = data.alignSelf
-    self.alignSelfX = data.alignSelfX
-    self.alignSelfY = data.alignSelfY
+-- private environment
+
+local Element_p = {
+    w = 0, h = 0,
+    layoutDirection = "vertical",
+    justifyChildren = "start", alignChildren = "center",
+    paddingL = 0, paddingT = 0, paddingR = 0, paddingB = 0,
+    paddingLeft = nil, paddingTop = nil, paddingRight = nil, paddingBottom = nil,
+    contentWidth = 0, contentHeight = 0,
+    spacing = 0, expandSpace = nil,
+    firstChildElement = nil, lastChildElement = nil, childElementCount = 0
+}
+local priv = setmetatable({[Element] = Element_p}, {__mode = "k"})
+
+local function initPrivInstance(self)
+    local p = {
+        isInitialized = false, firstActivated = false, isDeleted = false,
+        parentElement = nil,
+        previousElement = nil, nextElement = nil, sortingPriority = 0,
+        x = 0, y = 0, w = 0, h = 0,
+        width = nil, height = nil,
+        alignSelfX = nil, alignSelfY = nil,
+        marginL = 0, marginT = 0, marginR = 0, marginB = 0,
+        marginLeft = nil, marginTop = nil, marginRight = nil, marginBottom = nil,
+        inLayout = true,
+        layoutDirection = "vertical",
+        justifyChildren = "start", alignChildren = "center",
+        paddingL = 0, paddingT = 0, paddingR = 0, paddingB = 0,
+        paddingLeft = nil, paddingTop = nil, paddingRight = nil, paddingBottom = nil,
+        contentWidth = 0, contentHeight = 0,
+        spacing = 0, expandSpace = nil,
+        firstChildElement = nil, lastChildElement = nil, childElementCount = 0,
+    }
+    priv[self] = p
+    return p
+end
+
+-- helpers
+
+local function validateElement(self, name)
+    local typeStr = acceptClass and "Element instance or the class" or "Element instance"
+    if not (acceptClass and self == Element) and
+       not floof.instanceOf(self, Element)
+    then
+        error(("Invalid %s: %s expected, got %s"):format(name, typeStr, floof.typeOf(self)), 3)
+    elseif not priv[self] then
+        error(("Invalid %s: Element not properly constructed"):format(name), 3)
+    elseif priv[self].isDeleted then
+        error(("Invalid %s: deleted"):format(name), 3)
+    end
+end
+
+local function handleCallback(self, func, ...)
+    if not priv[self].isInitialized then return false
+    elseif floof.isCallable(self[func]) then
+        local s, e = pcall(self[func], self, ...)
+        if not s then error(e, 3) else return e end
+    else return self[func] end
+end
+
+local function privKeyIterator(k) return floof.newIterator(function(self) return priv[self] and priv[self][k] end) end
+
+-- public interface
+
+function Element:isConstructed() return priv[self] ~= nil end
+
+local getters = {
     
-    self.width = data.width
-    self.height = data.height
-    self.minWidth = data.minWidth
-    self.minHeight = data.minHeight
-    self.maxWidth = data.maxWidth
-    self.maxHeight = data.maxHeight
-    self.stretchWeight = data.stretchWeight
-    
-    self.spacing = data.spacing
-
-    self.padding  = data.padding
-    self.paddingX = data.paddingX
-    self.paddingY = data.paddingY
-    self.paddingL = data.paddingL
-    self.paddingT = data.paddingT
-    self.paddingR = data.paddingR
-    self.paddingB = data.paddingB
-
-    self.margin  = data.margin
-    self.marginX = data.marginX
-    self.marginY = data.marginY
-    self.marginL = data.marginL
-    self.marginT = data.marginT
-    self.marginR = data.marginR
-    self.marginB = data.marginB
-    
-    self.scrollX = 0
-    self.scrollY = 0
-    self.scrollSpeed = data.scrollSpeed
-
-    Element.super.init(self, data)
-
-    if data.elements then
-        for i, elem in ipairs(data.elements) do
-            pcall(self.append, self, elem)
+}
+function Element:__get(k)
+    if priv[self] and getters[k] then
+        if getters[k] == priv then
+            return priv[self][k]
+        else
+            return floof.safeReturn(getters[k], self)
         end
     end
-end
-
-Element._dirty = {}
-
-function Element:__get_dirty(self)
-    return Element._dirty[self] and true or false
-end
-
-function Element:__set_dirty(self, value)
-    Element._dirty[self] = value and true or false
-end
-
-function Element:__get_clip(self)
-    return self._clip
-end
-
-function Element:__set_clip(self, value)
-    self._clip = value and true or false
-end
-
-function Element:added(child)
-    if Element:isClassOf(child) and not self._elements:find(child) then
-        self._elements:append(child)
-        self.dirty = true
-    end
-end
-
-function Element:removed(child)
-    if Element:isClassOf(child) and self._elements:find(child) then
-        self._elements:remove(child)
-        self.dirty = true
-    end
-end
-
-function Element:append(child)
-    if not Element:isClassOf(child) then
-        error("Appended value must be an Element: " .. tostring(child) .. " (" .. type(child) .. ")", 2)
-    end
-    if self:isChildOf(child) then
-        error("Attempted to append an element to a descendant of itself", 2)
-    end
-    if child.parent == self then
-        error("Attempted to append an Element that is already a child of this Element", 2)
-    end
-    self._elements:append(child)
-    child.parent = self
-end
-
-function Element:remove(child)
-    if Element:isClassOf(child) and child.parent == self then
-        self._elements:remove(child)
-        child.parent = nil
-    end
-end
-
-function Element:insert(child, before)
-    if not Element:isClassOf(child) then
-        error("Inserted value must be an Element: " .. tostring(child) .. " (" .. type(child) .. ")", 2)
-    end
-    if self:isChildOf(child) then
-        error("Attempted to insert an Element as a child of itself", 2)
-    end
-    if child.parent == self then
-        error("Attempted to insert an Element that is already a child of this Element" , 2)
-    end
-    if not Element:isClassOf(before) then
-        error("Insertion anchor must be an Element: " .. tostring(before) .. " (" .. type(before) .. ")", 2)
-    end
-    if before.parent ~= self then
-        error("Insertion anchor must be a direct child of this Element", 2)
-    end
-    self._elements:insert(child, self._elements:find(before))
-    child.parent = self
-end
-
-function Element:__get_elements(self)
-    return self._elements:copy()
-end
-
-function Element:__get_inLayout(self)
-    return self._inLayout
-end
-
-function Element:__set_inLayout(self, value)
-    if value == nil and self ~= Element then
-        self._inLayout = nil
-        return
-    end
-    if type(value) == "boolean" then
-        self._inLayout = value
-    else
-        error("Attempted to set inLayout to an invalid value: " .. tostring(value) .. " (" .. type(value) .. ")", 2)
-    end
-    if Element:isClassOf(self.parent) then
-        self.parent.dirty = true
-    end
-end
-
-function Element:__get_direction(self)
-    return self._direction
-end
-
-function Element:__set_direction(self, value)
-    if value == nil and self ~= Element then
-        self._direction = nil
-        return
-    end
-    if Element.directions:find(value) then
-        self._direction = value
-    else
-        error("Attempted to set direction to an invalid value: " .. tostring(value) .. ", (available values: " .. table.concat(Element.directions, ", ") .. ")", 2)
-    end
-    self.dirty = true
-end
-
-function Element:__get_justify(self)
-    return self._justify
-end
-
-function Element:__set_justify(self, value)
-    if value == nil and self ~= Element then
-        self._justify = nil
-        return
-    end
-    if Element.justifyModes:find(value) then
-        self._justify = value
-    else
-        error("Attempted to set justify to an invalid value: " .. tostring(value) .. ", (available values: " .. table.concat(Element.justifyModes, ", ") .. ")", 2)
-    end
-    self.dirty = true
-end
-
-function Element:__get_align(self)
-    return self._align
-end
-
-function Element:__set_align(self, value)
-    if value == nil and self ~= Element then
-        self._align = nil
-        return
-    end
-    if Element.alignModes:find(value) then
-        self._align = value
-    else
-        error("Attempted to set align to an invalid value: " .. tostring(value) .. ", (available values: " .. table.concat(Element.alignModes, ", ") .. ")", 2)
-    end
-end
-
-function Element:__get_alignSelf(self)
-    return self._alignSelf or Element:isClassOf(self.parent) and self.parent.alignSelf or self.class.align
-end
-
-function Element:__set_alignSelf(self, value)
-    if value == nil and self ~= Element then
-        self._alignSelf = nil
-        return
-    end
-    if Element.alignModes:find(value) then
-        self._alignSelf = value
-    else
-        error("Attempted to set alignSelf to an invalid value: " .. tostring(value) .. ", (available values: " .. table.concat(Element.alignModes, ", ") .. ")", 2)
-    end
-end
-
-function Element:__get_alignSelfX(self)
-    return self._alignSelfX or self.alignSelf
-end
-
-function Element:__set_alignSelfX(self, value)
-    if value == nil and self ~= Element then
-        self._alignSelfX = nil
-        return
-    end
-    if Element.alignModes:find(value) then
-        self._alignSelfX = value
-    else
-        error("Attempted to set alignSelfX to an invalid value: " .. tostring(value) .. ", (available values: " .. table.concat(Element.alignModes, ", ") .. ")", 2)
-    end
-end
-
-function Element:__get_alignSelfY(self)
-    return self._alignSelfY or self.alignSelf
-end
-
-function Element:__set_alignSelfY(self, value)
-    if value == nil and self ~= Element then
-        self._alignSelfY = nil
-        return
-    end
-    if Element.alignModes:find(value) then
-        self._alignSelfY = value
-    else
-        error("Attempted to set alignSelfY to an invalid value: " .. tostring(value) .. ", (available values: " .. table.concat(Element.alignModes, ", ") .. ")", 2)
-    end
-end
-
-function Element:__get_spacing(self)
-    if type(self._spacing) == "function" then
-        return self:_spacing()
-    end
-    return self._spacing
-end
-
-function Element:__set_spacing(self, value)
-    if value == nil and self ~= Element then
-        self._spacing = nil
-        return
-    end
-    if type(value) == "number" or type(value) == "function" then
-        self._spacing = value
-    else
-        error("Attempted to set spacing to an invalid value: " .. tostring(value) .. " (" .. type(value) .. ")", 2)
-    end
-    self.dirty = true
-end
-
-function Element:__get_padding(self)
-    if type(self._padding) == "function" then
-        return self:_padding()
-    end
-    return self._padding
-end
-
-function Element:__set_padding(self, value)
-    if value == nil and self ~= Element then
-        self._padding = nil
-        return
-    end
-    if type(value) == "number" or type(value) == "function" then
-        self._padding = value
-    else
-        error("Attempted to set padding to an invalid value: " .. tostring(value) .. " (" .. type(value) .. ")", 2)
-    end
-    self.dirty = true
-end
-
-function Element:__get_paddingX(self)
-    if type(self._paddingX) == "function" then
-        return self:_paddingX()
-    end
-    return self._paddingX or self.padding
-end
-
-function Element:__set_paddingX(self, value)
-    if value == nil and self ~= Element then
-        self._paddingX = nil
-        return
-    end
-    if type(value) == "number" or type(value) == "function" then
-        self._paddingX = value
-    else
-        error("Attempted to set paddingX to an invalid value: " .. tostring(value) .. " (" .. type(value) .. ")", 2)
-    end
-    self.dirty = true
-end
-
-function Element:__get_paddingY(self)
-    if type(self._paddingY) == "function" then
-        return self:_paddingY()
-    end
-    return self._paddingY or self.padding
-end
-
-function Element:__set_paddingY(self, value)
-    if value == nil and self ~= Element then
-        self._paddingY = nil
-        return
-    end
-    if type(value) == "number" or type(value) == "function" then
-        self._paddingY = value
-    else
-        error("Attempted to set paddingY to an invalid value: " .. tostring(value) .. " (" .. type(value) .. ")", 2)
-    end
-    self.dirty = true
-end
-
-function Element:__get_paddingL(self)
-    if type(self._paddingL) == "function" then
-        return self:_paddingL()
-    end
-    return self._paddingL or self.paddingX
-end
-
-function Element:__set_paddingL(self, value)
-    if value == nil and self ~= Element then
-        self._paddingL = nil
-        return
-    end
-    if type(value) == "number" or type(value) == "function" then
-        self._paddingL = value
-    else
-        error("Attempted to set paddingL to an invalid value: " .. tostring(value) .. " (" .. type(value) .. ")", 2)
-    end
-    self.dirty = true
-end
-
-function Element:__get_paddingT(self)
-    if type(self._paddingT) == "function" then
-        return self:_paddingT()
-    end
-    return self._paddingT or self.paddingY
-end
-
-function Element:__set_paddingT(self, value)
-    if value == nil and self ~= Element then
-        self._paddingT = nil
-        return
-    end
-    if type(value) == "number" or type(value) == "function" then
-        self._paddingT = value
-    else
-        error("Attempted to set paddingT to an invalid value: " .. tostring(value) .. " (" .. type(value) .. ")", 2)
-    end
-    self.dirty = true
-end
-
-function Element:__get_paddingR(self)
-    if type(self._paddingR) == "function" then
-        return self:_paddingR()
-    end
-    return self._paddingR or self.paddingX
-end
-
-function Element:__set_paddingR(self, value)
-    if value == nil and self ~= Element then
-        self._paddingR = nil
-        return
-    end
-    if type(value) == "number" or type(value) == "function" then
-        self._paddingR = value
-    else
-        error("Attempted to set paddingR to an invalid value: " .. tostring(value) .. " (" .. type(value) .. ")", 2)
-    end
-    self.dirty = true
-end
-
-function Element:__get_paddingB(self)
-    if type(self._paddingB) == "function" then
-        return self:_paddingB()
-    end
-    return self._paddingB or self.paddingY
-end
-
-function Element:__set_paddingB(self, value)
-    if value == nil and self ~= Element then
-        self._paddingB = nil
-        return
-    end
-    if type(value) == "number" or type(value) == "function" then
-        self._paddingB = value
-    else
-        error("Attempted to set paddingB to an invalid value: " .. tostring(value) .. " (" .. type(value) .. ")", 2)
-    end
-    self.dirty = true
-end
-
-function Element:__get_margin(self)
-    if type(self._margin) == "function" then
-        return self:_margin()
-    end
-    return self._margin
-end
-
-function Element:__set_margin(self, value)
-    if value == nil and self ~= Element then
-        self._margin = nil
-        return
-    end
-    if type(value) == "number" or type(value) == "function" then
-        self._margin = value
-    else
-        error("Attempted to set margin to an invalid value: " .. tostring(value) .. " (" .. type(value) .. ")", 2)
-    end
-    self.dirty = true
-end
-
-function Element:__get_marginX(self)
-    if type(self._marginX) == "function" then
-        return self:_marginX()
-    end
-    return self._marginX or self.margin
-end
-
-function Element:__set_marginX(self, value)
-    if value == nil and self ~= Element then
-        self._marginX = nil
-        return
-    end
-    if type(value) == "number" or type(value) == "function" then
-        self._marginX = value
-    else
-        error("Attempted to set marginX to an invalid value: " .. tostring(value) .. " (" .. type(value) .. ")", 2)
-    end
-    self.dirty = true
-end
-
-function Element:__get_marginY(self)
-    if type(self._marginY) == "function" then
-        return self:_marginY()
-    end
-    return self._marginY or self.margin
-end
-
-function Element:__set_marginY(self, value)
-    if value == nil and self ~= Element then
-        self._marginY = nil
-        return
-    end
-    if type(value) == "number" or type(value) == "function" then
-        self._marginY = value
-    else
-        error("Attempted to set marginY to an invalid value: " .. tostring(value) .. " (" .. type(value) .. ")", 2)
-    end
-    self.dirty = true
-end
-
-function Element:__get_marginL(self)
-    if type(self._marginL) == "function" then
-        return self:_marginL()
-    end
-    return self._marginL or self.marginX
-end
-
-function Element:__set_marginL(self, value)
-    if value == nil and self ~= Element then
-        self._marginL = nil
-        return
-    end
-    if type(value) == "number" or type(value) == "function" then
-        self._marginL = value
-    else
-        error("Attempted to set marginL to an invalid value: " .. tostring(value) .. " (" .. type(value) .. ")", 2)
-    end
-    self.dirty = true
-end
-
-function Element:__get_marginT(self)
-    if type(self._marginT) == "function" then
-        return self:_marginT()
-    end
-    return self._marginT or self.marginY
-end
-
-function Element:__set_marginT(self, value)
-    if value == nil and self ~= Element then
-        self._marginT = nil
-        return
-    end
-    if type(value) == "number" or type(value) == "function" then
-        self._marginT = value
-    else
-        error("Attempted to set marginT to an invalid value: " .. tostring(value) .. " (" .. type(value) .. ")", 2)
-    end
-    self.dirty = true
-end
-
-function Element:__get_marginR(self)
-    if type(self._marginR) == "function" then
-        return self:_marginR()
-    end
-    return self._marginR or self.marginX
-end
-
-function Element:__set_marginR(self, value)
-    if value == nil and self ~= Element then
-        self._marginR = nil
-        return
-    end
-    if type(value) == "number" or type(value) == "function" then
-        self._marginR = value
-    else
-        error("Attempted to set marginR to an invalid value: " .. tostring(value) .. " (" .. type(value) .. ")", 2)
-    end
-    self.dirty = true
-end
-
-function Element:__get_marginB(self)
-    if type(self._marginB) == "function" then
-        return self:_marginB()
-    end
-    return self._marginB or self.marginY
-end
-
-function Element:__set_marginB(self, value)
-    if value == nil and self ~= Element then
-        self._marginB = nil
-        return
-    end
-    if type(value) == "number" or type(value) == "function" then
-        self._marginB = value
-    else
-        error("Attempted to set marginB to an invalid value: " .. tostring(value) .. " (" .. type(value) .. ")", 2)
-    end
-    self.dirty = true
-end
-
-function Element:__get_minWidth(self)
-    if type(self._minWidth) == "function" then
-        return self:_minWidth() or 0
-    end
-    return self._minWidth or 0
-end
-
-function Element:__set_minWidth(self, value)
-    if type(value) == "function" or type(value) == "number" then
-        self._minWidth = value
-    else
-        error("Attempted to set minWidth to an invalid value: " .. tostring(value) .. " (" .. type(value) .. ")", 2)
-    end
-    self.dirty = true
-end
-
-function Element:__get_minHeight(self)
-    if type(self._minHeight) == "function" then
-        return self:_minHeight() or 0
-    end
-    return self._minHeight or 0
-end
-
-function Element:__set_minHeight(self, value)
-    if type(value) == "function" or type(value) == "number" then
-        self._minHeight = value
-    else
-        error("Attempted to set minHeight to an invalid value: " .. tostring(value) .. " (" .. type(value) .. ")", 2)
-    end
-    self.dirty = true
-end
-
-function Element:__get_maxWidth(self)
-    if type(self._maxWidth) == "function" then
-        return self:_maxWidth() or math.huge
-    end
-    return self._maxWidth or math.huge
-end
-
-function Element:__set_maxWidth(self, value)
-    if type(value) == "function" or type(value) == "number" then
-        self._maxWidth = value
-    else
-        error("Attempted to set maxWidth to an invalid value: " .. tostring(value) .. " (" .. type(value) .. ")", 2)
-    end
-    self.dirty = true
-end
-
-function Element:__get_maxHeight(self)
-    if type(self._maxHeight) == "function" then
-        return self:_maxHeight() or math.huge
-    end
-    return self._maxHeight or math.huge
-end
-
-function Element:__set_maxHeight(self, value)
-    if type(value) == "function" or type(value) == "number" then
-        self._maxHeight = value
-    else
-        error("Attempted to set maxHeight to an invalid value: " .. tostring(value) .. " (" .. type(value) .. ")", 2)
-    end
-    self.dirty = true
-end
-
-function Element:__get_width(self)
-    if type(self._width) == "function" then
-        return self:_width() and math.max(self.minWidth, math.min(self.maxWidth, self:_width())) or nil
-    end
-    return self._width and math.max(self.minWidth, math.min(self.maxWidth, self._width)) or nil
-end
-
-function Element:__set_width(self, value)
-    if type(value) == "function" or type(value) == "number" then
-        self._width = value
-    else
-        error("Attempted to set width to an invalid value: " .. tostring(value) .. " (" .. type(value) .. ")", 2)
-    end
-    self.dirty = true
-end
-
-function Element:__get_height(self)
-    if type(self._height) == "function" then
-        return self:_height() and math.max(self.minHeight, math.min(self.maxHeight, self:_height())) or nil
-    end
-    return self._height and math.max(self.minHeight, math.min(self.maxHeight, self._height)) or nil
-end
-
-function Element:__set_height(self, value)
-    if type(value) == "function" or type(value) == "number" then
-        self._height = value
-    else
-        error("Attempted to set height to an invalid value: " .. tostring(value) .. " (" .. type(value) .. ")", 2)
-    end
-    self.dirty = true
-end
-
-function Element:__get_stretchWeight(self)
-    if type(self._stretchWeight) == "function" then
-        return self:_stretchWeight()
-    end
-    return self._stretchWeight or 1
-end
-
-function Element:__set_stretchWeight(self, value)
-    if type(value) == "function" or type(value) == "number" and value > 0 then
-        self._stretchWeight = value
-    else
-        error("Attempted to set stretchWeight to an invalid value: " .. tostring(value) .. " (" .. type(value) .. ")", 2)
-    end
-    if self.inLayout and Element:isClassOf(self.parent) then
-        self.parent.dirty = true
-    end
-end
-
-function Element:__get_rawContentWidth(self)
-    if self.direction == "horizontal" then
-        local w = 0
-        for i, elem in self._elements:iterate() do
-            w = w + elem.w
+    return floof.safeReturn(floof.get, Object, self, k)
+end
+
+local setters = {}
+function Element:__set(k, v)
+    if priv[self] and (setters[k] or getters[k]) then
+        if not setters[k] then
+            error(("Cannot modify private field %q"):format(k), 2)
+        else
+            floof.safeInvoke(setters[k], self, v)
         end
-        return w
-    else
-        local w = 0
-        for i, elem in self._elements:iterate() do
-            w = math.max(w, elem.w)
-        end
-        return w
-    end
+    else floof.safeInvoke(floof.set, Object, self, k, v) end
 end
 
-function Element:__get_rawContentHeight(self)
-    if self.direction == "vertical" then
-        local h = 0
-        for i, elem in self._elements:iterate() do
-            h = h + elem.h
-        end
-        return h
-    else
-        local h = 0
-        for i, elem in self._elements:iterate() do
-            h = math.max(h, elem.h)
-        end
-        return h
-    end
-end
+-- sorting order
 
-function Element:__get_contentWidth(self)
-    if self.direction == "horizontal" then
-        local elements = self._elements:filtered(function(elem) return elem.inLayout end)
-        local w = 0
-        for i, elem in elements:iterate() do
-            if i == 1 then
-                w = w + math.max(self.paddingL, elem.marginL)
-            end
-            w = w + elem.w
-            if i < elements.length then
-                w = w + math.max(self.spacing, elem.marginR, elements[i + 1].marginL)
+function setSortOrder(self, sortingPriority)
+    validateElement(self, "caller")
+    if type(sortingPriority) ~= "number" then
+        error("Value must be a number", 2)
+    end
+    local self_p = priv[self]
+    self_p.sortingPriority = sortingPriority
+    local parent = self_p.parentElement or Element
+    local parent_p = priv[parent]
+    if self_p.nextElement and priv[self_p.nextElement].sortingPriority > sortingPriority then
+        for sib in iterElem(self) do
+            local sib_p = priv[sib]
+            if sib_p.sortingPriority > sortingPriority then break end
+            self_p.nextElement, sib_p.previousElement = sib_p.nextElement, self_p.previousElement
+            if sib_p.nextElement then
+                priv[sib_p.nextElement].previousElement = self
             else
-                w = w + math.max(self.paddingR, elem.marginR)
+                parent_p.frontmost = self
             end
-        end
-        return w
-    else
-        local w = 0
-        for i, elem in self._elements:iterate() do
-            w = math.max(w, elem.w + math.max(self.paddingL, elem.marginL) + math.max(self.paddingR, elem.marginR))
-        end
-        return w
-    end
-end
-
-function Element:__get_contentHeight(self)
-    if self.direction == "vertical" then
-        local elements = self._elements:filtered(function(elem) return elem.inLayout end)
-        local h = 0
-        for i, elem in elements:iterate() do
-            if i == 1 then
-                h = h + math.max(self.paddingT, elem.marginT)
-            end
-            h = h + elem.h
-            if i < elements.length then
-                h = h + math.max(self.spacing, elem.marginB, elements[i + 1].marginT)
+            if self_p.previousElement then
+                priv[self_p.previousElement].nextElement = sib
             else
-                h = h + math.max(self.paddingB, elem.marginB)
+                parent_p.backmost = sib
             end
+            sib_p.nextElement, self_p.previousElement = self, sib
         end
-        return h
-    else
-        local h = 0
-        for i, elem in self._elements:iterate() do
-            h = math.max(h, elem.h + math.max(self.paddingT, elem.marginT) + math.max(self.paddingB, elem.marginB))
+    elseif self_p.previousElement and priv[self_p.previousElement].sortingPriority <= sortingPriority then
+        for sib in backIterElem(self) do
+            local sib_p = priv[sib]
+            if sib_p.sortingPriority <= sortingPriority then break end
+            sib_p.nextElement, self_p.previousElement = self_p.nextElement, sib_p.previousElement
+            if self_p.nextElement then
+                priv[self_p.nextElement].previousElement = sib
+            else
+                parent_p.frontmost = sib
+            end
+            if sib_p.previousElement then
+                priv[sib_p.previousElement].nextElement = self
+            else
+                parent_p.backmost = self
+            end
+            self_p.nextElement, sib_p.previousElement = sib, self
         end
-        return h
+    end
+    if self_p.isInitialized then
+        invokeHandlers(self, "depthchanged")
+        handleCallback(self, "depthchanged")
     end
 end
+Element.setSortOrder, setters.sortingPriority = setSortOrder, setSortOrder
 
-function Element:__get_x(self)
-    local x = Element:isClassOf(self.parent) and self.parent.x + self.parent.scrollX or love.graphics.getWidth() / 2
-    local w = Element:isClassOf(self.parent) and self.parent.w or love.graphics.getWidth()
-    if self._x then
-        return x + self._x
+function moveBefore(self, previousElement)
+    validateElement(self, "caller")
+    if previousElement ~= nil then validateElement(previousElement, "value") end
+    if self == previousElement then error("Invalid value: equal to caller", 2) end
+    local self_p, backward_p = priv[self], priv[previousElement]
+    if previousElement and backward_p.parent ~= self_p.parent then
+        error("Invalid value: object must be a sibling of the caller", 2)
+    end
+    if self_p.previousElement == previousElement then return end
+    local parent_p = priv[self_p.parent] or Element_p
+    local p_backward = self_p.previousElement
+    local x, y = parent_p.pointerX, parent_p.pointerY
+    if self_p.nextElement then
+        priv[self_p.nextElement].previousElement = self_p.previousElement
     else
-        local l = x - w/2 + self.marginL
-        local r = x + w/2 - self.marginR
-        if self.alignSelfX == "start" then
-            return l + self.w/2
-        elseif self.alignSelfX == "end" then
-            return r - self.w/2
+        parent_p.frontmost = self_p.previousElement
+    end
+    if self_p.previousElement then
+        priv[self_p.previousElement].nextElement = self_p.nextElement
+    else
+        parent_p.backmost = self_p.nextElement
+    end
+    if previousElement then
+        self_p.sortingPriority = backward_p.sortingPriority
+        if backward_p.nextElement then
+            priv[backward_p.nextElement].previousElement = self
         else
-            return (l + r) / 2
+            parent_p.frontmost = self
         end
-    end
-end
-
-function Element:__get_y(self)
-    local y = Element:isClassOf(self.parent) and self.parent.y + self.parent.scrollY or love.graphics.getHeight() / 2
-    local h = Element:isClassOf(self.parent) and self.parent.h or love.graphics.getHeight()
-    if self._y then
-        return y + self._y
+        backward_p.nextElement = self
     else
-        local t = y - h/2 + self.marginT
-        local b = y + h/2 - self.marginB
-        if self.alignSelfY == "start" then
-            return t + self.h/2
-        elseif self.alignSelfY == "end" then
-            return b - self.h/2
-        else
-            return (t + b) / 2
-        end
+        self_p.sortingPriority = priv[parent_p.backmost].sortingPriority
+        priv[parent_p.backmost].previousElement, parent_p.backmost = self, self
+    end
+    if self_p.isInitialized then
+        invokeHandlers(self, "orderchanged")
+        handleCallback(self, "orderchanged")
     end
 end
+Element.moveBefore, setters.previousElement = moveBefore, moveBefore
 
-function Element:__get_w(self)
-    local w = Element:isClassOf(self.parent) and self.parent.w or love.graphics.getWidth()
-    return self._w or math.max(self.minWidth, math.min(self.maxWidth, self.width or self.alignSelfX == "stretch" and w - math.max(self.paddingL, self.marginL) - math.max(self.paddingR, self.marginR) or self.contentWidth))
-end
-
-function Element:__get_h(self)
-    local h = Element:isClassOf(self.parent) and self.parent.h or love.graphics.getHeight()
-    return self._h or math.max(self.minHeight, math.min(self.maxHeight, self.height or self.alignSelfY == "stretch" and h - math.max(self.paddingT, self.marginT) - math.max(self.paddingB, self.marginB) or self.contentHeight))
-end
-
-function Element:__get_l(self)
-    return self.x - self.w/2
-end
-
-function Element:__get_t(self)
-    return self.y - self.h/2
-end
-
-function Element:__get_r(self)
-    return self.x + self.w/2
-end
-
-function Element:__get_b(self)
-    return self.y + self.h/2
-end
-
-function Element:recalculate()
-    if not self then -- Element.recalculate() handles all dirty elements
-        while next(Element._dirty) do
-            next(Element._dirty):recalculate()
-        end
-        return
+function moveAfter(self, nextElement)
+    validateElement(self, "caller")
+    if nextElement ~= nil then validateElement(nextElement, "value") end
+    if self == nextElement then error("Invalid value: equal to caller", 2) end
+    local self_p, forward_p = priv[self], priv[nextElement]
+    if nextElement and forward_p.parent ~= self_p.parent then
+        error("Invalid value: object must be a sibling of the caller", 2)
     end
-    if self.inLayout and Element:isClassOf(self.parent) then
-        self.parent:recalculate()
-    end
-    for i, elem in self._elements:iterate() do
-        elem._x, elem._y, elem._w, elem._h = nil
-    end
-    local elements = self._elements:filtered(function(elem) return elem.inLayout end)
-    if elements.length == 0 then
-        self.scrollX, self.scrollY = 0, 0
-        return
-    end
-    -- horizontal (x, w, l, r)
-    if self.direction == "horizontal" then
-        local minWidth, maxWidth, stretchWeight = 0, 0, 0
-        local rawContentWidth, contentWidth, availableWidth = self.rawContentWidth, self.contentWidth, self.w
-        local totalSpacing = contentWidth - rawContentWidth
-        for i, elem in elements:iterate() do
-            local s = i < elements.length and math.max(elem.marginR, elem.next.marginL, self.spacing) or elem.marginR
-            if i == 1 then s = s + elem.marginL end
-            minWidth       = minWidth       + elem.minWidth
-            maxWidth       = maxWidth       + elem.maxWidth
-            stretchWeight  = stretchWeight  + elem.stretchWeight
-        end
-        if self.justify == "stretch" and minWidth + totalSpacing < availableWidth and maxWidth + totalSpacing > availableWidth then
-            local widths, flexible = {}, array()
-            local fixedSize = 0
-            local flexibleWeight = 0
-            for i, elem in elements:iterate() do
-                local intendedSize = availableWidth / stretchWeight * elem.stretchWeight
-                if elem.width then
-                    widths[elem] = elem.width
-                    fixedSize = fixedSize + elem.width
-                elseif intendedSize < elem.minWidth then
-                    widths[elem] = elem.minWidth
-                    fixedSize = fixedSize + elem.minWidth
-                elseif intendedSize > elem.maxWidth then
-                    widths[elem] = elem.maxWidth
-                    fixedSize = fixedSize + elem.maxWidth
-                else
-                    flexible:append(elem)
-                    flexibleWeight = flexibleWeight + elem.stretchWeight
-                end
-            end
-            if flexible.length > 0 then
-                local flexibleSize = availableWidth - totalSpacing - fixedSize
-                for i, elem in flexible:iterate() do
-                    widths[elem] = flexibleSize / flexibleWeight * elem.stretchWeight
-                    fixedSize = fixedSize + widths[elem]
-                end
-            end
-            local p = 0
-            for i, elem in elements:iterate() do
-                p = p + i > 1 and math.max(elem.marginL, elem.previous.marginR, self.spacing) or math.max(elem.marginL, self.paddingL)
-                elem._w = widths[elem]
-                elem._x = p + elem._w / 2 - self.w / 2
-                p = p + elem._w
-            end
-        elseif self.justify == "space" and elements.length > 1 and contentWidth < availableWidth then
-            local spaces, flexible = {}, array()
-            local availableSpace = (availableWidth - rawContentWidth
-                - math.max(self.paddingL, elements[ 1].marginL)
-                - math.max(self.paddingR, elements[-1].marginR)
-            )
-            local fixedSpace = 0
-            local intendedSpace = availableSpace / (elements.length - 1)
-            for i, elem in elements:iterate() do
-                if i < elements.length then
-                    local s = math.max(elem.marginR, elements[i + 1].marginL, self.spacing)
-                    if intendedSpace < s then
-                        spaces[i] = s
-                        fixedSpace = fixedSpace + s
-                    else
-                        flexible:append(i)
-                    end
-                end
-            end
-            intendedSpace = (availableSpace - fixedSpace) / flexible.length
-            for i, s in flexible:iterate() do
-                spaces[s] = intendedSpace
-            end
-            local p = spaces[0]
-            for i, elem in elements:iterate() do
-                elem._w = elem.w
-                elem._x = p + elem._w / 2 - availableWidth / 2
-                p = p + elem._w
-                if i < elements.length then
-                    p = p + spaces[i]
-                end
-            end
-        elseif (self.justify == "even" or self.justify == "space" and elements.length == 1 or self.justify == "stretch" and minWidth + totalSpacing < availableWidth) and contentWidth < availableWidth then
-            local spaces, flexible = {}, array()
-            local availableSpace = availableWidth - rawContentWidth
-            local fixedSpace = 0
-            local intendedSpace = availableSpace / (elements.length + 1)
-            for i, elem in elements:iterate() do
-                local s = i > 1 and math.max(elem.marginL, elements[i - 1].marginR, self.spacing) or math.max(elem.marginL, self.paddingL)
-                if intendedSpace < s then
-                    spaces[i] = s
-                    fixedSpace = fixedSpace + s
-                else
-                    flexible:append(i)
-                end
-                if i == elements.length then
-                    local rs = math.max(elem.marginR, self.paddingR)
-                    if intendedSpace < rs then
-                        spaces[0] = rs
-                        fixedSpace = fixedSpace + rs
-                    else
-                        flexible:append(0)
-                    end
-                end
-            end
-            intendedSpace = (availableSpace - fixedSpace) / flexible.length
-            for i, s in flexible:iterate() do
-                spaces[s] = intendedSpace
-            end
-            local p = 0
-            for i, elem in elements:iterate() do
-                p = p + spaces[i]
-                elem._w = elem.w
-                elem._x = p + elem._w / 2 - availableWidth / 2
-                p = p + elem._w
-            end
-        else
-            local p = self.justify == "center" and availableWidth / 2 - contentWidth / 2 or self.justify == "end" and availableWidth - contentWidth or 0
-            for i, elem in elements:iterate() do
-                p = p + i > 1 and math.max(elem.marginL, elements[i - 1].marginR, self.spacing) or math.max(elem.marginL, self.paddingL)
-                elem._w = elem.w
-                elem._x = p + elem._w / 2 - availableWidth / 2
-                p = p + elem._w
-            end
-        end
-    elseif self.direction == "vertical" then
-        local minHeight, maxHeight, stretchWeight = 0, 0, 0
-        local rawContentHeight, contentHeight, availableHeight = self.rawContentHeight, self.contentHeight, self.h
-        local totalSpacing = contentHeight - rawContentHeight
-        for i, elem in elements:iterate() do
-            local s = i < elements.length and math.max(elem.marginB, elem.next.marginT, self.spacing) or elem.marginB
-            if i == 1 then s = s + elem.marginT end
-            minHeight       = minHeight       + elem.minHeight
-            maxHeight       = maxHeight       + elem.maxHeight
-            stretchWeight   = stretchWeight   + elem.stretchWeight
-        end
-        if self.justify == "stretch" and minHeight + totalSpacing < availableHeight and maxHeight + totalSpacing > availableHeight then
-            local heights, flexible = {}, array()
-            local fixedSize = 0
-            local flexibleWeight = 0
-            for i, elem in elements:iterate() do
-                local intendedSize = availableHeight / stretchWeight * elem.stretchWeight
-                if elem.height then
-                    heights[elem] = elem.height
-                    fixedSize = fixedSize + elem.height
-                elseif intendedSize < elem.minHeight then
-                    heights[elem] = elem.minHeight
-                    fixedSize = fixedSize + elem.minHeight
-                elseif intendedSize > elem.maxHeight then
-                    heights[elem] = elem.maxHeight
-                    fixedSize = fixedSize + elem.maxHeight
-                else
-                    flexible:append(elem)
-                    flexibleWeight = flexibleWeight + elem.stretchWeight
-                end
-            end
-            if flexible.length > 0 then
-                local flexibleSize = availableHeight - totalSpacing - fixedSize
-                for i, elem in flexible:iterate() do
-                    heights[elem] = flexibleSize / flexibleWeight * elem.stretchWeight
-                    fixedSize = fixedSize + heights[elem]
-                end
-            end
-            local p = 0
-            for i, elem in elements:iterate() do
-                p = p + i > 1 and math.max(elem.marginT, elem.previous.marginB, self.spacing) or math.max(elem.marginT, self.paddingT)
-                elem._h = heights[elem]
-                elem._y = p + elem._h / 2 - availableHeight / 2
-                p = p + elem._h
-            end
-        elseif self.justify == "space" and elements.length > 1 and contentHeight < availableHeight then
-            local spaces, flexible = {}, array()
-            local fixedSize = 0
-            local intendedSpace = (availableHeight - totalSpacing) / (elements.length - 1)
-            for i, elem in elements:iterate() do
-                if i < elements.length then
-                    if intendedSpace < elem.marginB then
-                        spaces[i] = elem.marginB
-                        fixedSize = fixedSize + elem.marginB
-                    else
-                        flexible:append(i)
-                    end
-                end
-            end
-            intendedSpace = (availableHeight - totalSpacing - fixedSize) / flexible.length
-            for i, s in flexible:iterate() do
-                spaces[s] = intendedSpace
-            end
-            local p = 0
-            for i, elem in elements:iterate() do
-                elem._h = elem.height or math.max(elem.minHeight, math.min(elem.maxHeight, elem.contentHeight))
-                elem._y = p + elem._h / 2 - availableHeight / 2
-                p = p + elem._h
-                if i < elements.length then
-                    p = p + spaces[i]
-                end
-            end
-        elseif (self.justify == "even" or self.justify == "space" and elements.length == 1 or self.justify == "stretch" and minHeight < availableHeight) and contentHeight < availableHeight then
-            local spaces, flexible = {}, array()
-            local fixedSize = 0
-            local intendedSpace = (availableHeight - totalSpacing) / (elements.length + 1)
-            for i, elem in elements:iterate() do
-                if intendedSpace < elem.marginT then
-                    spaces[i] = elem.marginT
-                    fixedSize = fixedSize + elem.marginT
-                else
-                    flexible:append(i)
-                end
-                if i == elements.length then
-                    if intendedSpace < elem.marginB then
-                        spaces[0] = elem.marginB
-                        fixedSize = fixedSize + elem.marginB
-                    else
-                        flexible:append(0)
-                    end
-                end
-            end
-            intendedSpace = (availableHeight - totalSpacing - fixedSize) / flexible.length
-            for i, s in flexible:iterate() do
-                spaces[s] = intendedSpace
-            end
-            local p = 0
-            for i, elem in elements:iterate() do
-                p = p + spaces[i]
-                elem._h = elem.height or math.max(elem.minHeight, math.min(elem.maxHeight, elem.contentHeight))
-                elem._y = p + elem._h / 2 - availableHeight / 2
-                p = p + elem._h
-            end
-        else
-            local p = self.justify == "center" and availableHeight / 2 - contentHeight / 2 or self.justify == "end" and availableHeight - contentHeight or 0
-            for i, elem in elements:iterate() do
-                p = p + i > 1 and math.max(elem.marginT, elem.previous.marginB, self.spacing) or elem.marginT
-                elem._h = elem.height or math.max(elem.minHeight, math.min(elem.maxHeight, elem.contentHeight))
-                elem._y = p + elem._h / 2 - availableHeight / 2
-                p = p + elem._h
-            end
-        end
-    end
-    -- x scroll
-    if contentWidth > availableWidth then
-        local minScrollX = (self.direction == "horizontal" and self.justify == "end"    or self.align == "end"   )
-                            and availableWidth - contentWidth
-                        or (self.direction == "horizontal" and self.justify == "center" or self.align == "center")
-                            and availableWidth / 2 - contentWidth / 2
-                        or 0
-        local maxScrollX = (self.direction == "horizontal" and self.justify == "end"    or self.align == "end"   )
-                            and 0
-                        or (self.direction == "horizontal" and self.justify == "center" or self.align == "center")
-                            and contentWidth / 2 - availableWidth / 2
-                        or contentWidth - availableWidth
-        self.scrollX = math.max(minScrollX, math.min(maxScrollX, self.scrollX))
+    if self_p.nextElement == nextElement then return end
+    local parent_p = priv[self_p.parent] or Element_p
+    local p_backward = self_p.previousElement
+    local x, y = parent_p.pointerX, parent_p.pointerY
+    if self_p.nextElement then
+        priv[self_p.nextElement].previousElement = self_p.previousElement
     else
-        self.scrollX = 0
+        parent_p.frontmost = self_p.previousElement
     end
-    -- y scroll
-    if contentHeight > availableHeight then
-        local minScrollY = (self.direction == "vertical" and self.justify == "end"    or self.align == "end"   )
-                            and  availableHeight - contentHeight
-                        or (self.direction == "vertical" and self.justify == "center" or self.align == "center")
-                            and availableHeight / 2 - contentHeight / 2
-                        or 0
-        local maxScrollY = (self.direction == "vertical" and self.justify == "end"    or self.align == "end"   )
-                            and 0
-                        or (self.direction == "vertical" and self.justify == "center" or self.align == "center")
-                            and contentHeight / 2 - availableHeight / 2
-                        or contentHeight - availableHeight
-        self.scrollY = math.max(minScrollY, math.min(maxScrollY, self.scrollY))
+    if self_p.previousElement then
+        priv[self_p.previousElement].nextElement = self_p.nextElement
     else
-        self.scrollY = 0
+        parent_p.backmost = self_p.nextElement
     end
-    self.dirty = false
-end
-
-function Element:check(x, y)
-    if not self.clip then
-        for i, elem in self._elements:iterate() do
-            if elem:check(x, y) then
-                return true
-            end
+    if nextElement then
+        self_p.sortingPriority = forward_p.sortingPriority
+        if forward_p.previousElement then
+            priv[forward_p.previousElement].nextElement = self
+        else
+            parent_p.backmost = self
         end
+        forward_p.previousElement = self
+    else
+        self_p.sortingPriority = priv[parent_p.frontmost].sortingPriority
+        priv[parent_p.frontmost].nextElement, parent_p.frontmost = self, self
     end
-    return x > self.l and y > self.t and x < self.r and y < self.b
+    if self_p.isHovered and forward_p.behindHover then
+        for sib in backIterElem(p_backward, true) do
+            if sib == self then break end
+            local sib_p = priv[sib]
+            sib_p.behindHover = false
+            if floof.safeInvoke(checkHover, sib) then break end
+        end
+    elseif forward_p.isHovered or forward_p.behindHover then
+        self_p.behindHover = true
+    end
+    if self_p.isInitialized then
+        invokeHandlers(self, "depthchanged")
+        handleCallback(self, "depthchanged")
+    end
+end
+Element.moveAfter, setters.nextElement = moveAfter, moveAfter
+
+function setFirstChild(self, frontmost)
+    validateElement(self, "caller", true)
+    validateElement(frontmost, "value")
+    local self_p, frontmost_p = priv[self], priv[frontmost]
+    if frontmost.parent ~= self then
+        error("Invalid value: object must be a sibling of the caller", 2)
+    end
+    if self_p.frontmost == frontmost then return end
+    floof.safeInvoke(moveBefore, frontmost, self_p.frontmost)
+end
+Element.moveToFront, setters.frontmost = setFirstChild, setFirstChild
+
+function setLastChild(self, backmost)
+    validateElement(self, "caller", true)
+    validateElement(backmost, "value")
+    local self_p, backmost_p = priv[self], priv[backmost]
+    if bacmost_p.parent ~= self then
+        error("Invalid value: object must be a sibling of the caller", 2)
+    end
+    if self_p.backmost == backmost then return end
+    floof.safeInvoke(moveAfter, backmost, self_p.backmost)
+end
+Element.moveToBack, setters.backmost = setLastChild, setLastChild
+
+function previousActiveElem(self)
+    repeat
+        self = priv[self].nextElement
+    until not self or priv[self].isActive
+    return self
+end
+function nextActiveElem(self)
+    repeat
+        self = priv[self].previousElement
+    until not self or priv[self].isActive
+    return self
+end
+getters.previousActiveElem, getters.nextActiveElem = previousActiveElem, nextActiveElem
+
+function firstActiveChElem(self)
+    local frontmost = priv[self].frontmost
+    while frontmost and not priv[frontmost].isActive do
+        frontmost = priv[frontmost].previousElement
+    end
+    return frontmost
+end
+function lastActiveChElem(self)
+    local backmost = priv[self].backmost
+    while backmost and not priv[backmost].isActive do
+        backmost = priv[backmost].nextElement
+    end
+    return backmost
+end
+getters.firstActiveChElem, getters.lastActiveChElem = firstActiveChElem, lastActiveChElem
+
+iterElem = privKeyIterator("nextElement")
+function iterElemCh(self)
+    if priv[self] then
+        return iterElem(priv[self].backmost, true)
+    else
+        return rawget, {}
+    end
+end
+Element.iterElem, Element.iterElemCh = iterElem, iterElemCh
+
+backIterElem = privKeyIterator("previousElement")
+function backIterElemCh(self)
+    if priv[self] then
+        return backIterElem(priv[self].frontmost, true)
+    else
+        return rawget, {}
+    end
+end
+Element.backIterElem, Element.backIterElemCh = backIterElem, backIterElemCh
+
+function hierPrevElem(self, start)
+    if not priv[self] then return end
+    if priv[self].backmost then return priv[self].backmost end
+    for obj in ancestors(self) do
+        if obj == start then return end
+        if priv[obj].nextElement then return priv[obj].nextElement end
+    end
+end
+hierElem = floof.newIterator(hierPrevElem)
+Element.hierElem, Element.hierPrevElem = hierElem, hierPrevElem
+
+function hierNextElem(self, start)
+    if not priv[self] then return end
+    if priv[self].frontmost then return priv[self].frontmost end
+    for obj in ancestors(self) do
+        if obj == start then return end
+        if priv[obj].previousElement then return priv[obj].previousElement end
+    end
+end
+backHierElem = floof.newIterator(hierNextElem)
+Element.backHierElem, Element.hierNextElem = backHierElem, hierNextElem
+
+-- logic
+
+function dx(self, dx)
+
 end
 
-function Element:predraw()
-    if self.clip then
-        love.graphics.intersectScissor(self.l, self.t, self.w, self.h)
-    end
-end
+-- event hooks
 
-Element.inLayout = true
-Element.direction = "vertical"
-Element.justify = "start"
-Element.align = "start"
+Element:registerHandler("constructed", function(self)
+    local self_p = initPrivInstance(self)
+end)
 
-Element.spacing = 0
-Element.padding = 0
-Element.margin = 0
+Element:registerHandler("initialized", function(self)
+    local self_p = priv[self]
+    self_p.isInitialized = true
+end)
 
-Element.scrollSpeed = 5
+Element:registerHandler("deleted", function(self)
+    local self_p = priv[self]
+    self_p.isDeleted = true
+end)
+
+Element:registerHandler("orphaned", function(self)
+
+end)
+Element:registerHandler("addedto", function(self, parent)
+
+end)
+
+Element:registerHandler("activated", function(self)
+
+end)
+Element:registerHandler("deactivated", function(self)
+
+end)
 
 return Element

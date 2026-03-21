@@ -50,7 +50,7 @@ local Object = require("object")
 -- Create a custom class
 local Player = Object:derive("Player")
 
-function Player:init(data)
+function Player:__init(data)
     self.x = data.x or 0
     self.y = data.y or 0
     self.w = data.w or 32
@@ -118,7 +118,7 @@ Use `Object:derive(name)` to create subclasses:
 ```lua
 local MyClass = Object:derive("MyClass")
 
-function MyClass:init(data)
+function MyClass:__init(data)
     -- Initialize with data
     self.x = data.x or 0
     self.y = data.y or 0

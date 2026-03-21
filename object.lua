@@ -1,837 +1,1663 @@
+local WARN_QUIT_BLOCK = true
+local QUIT_BLOCK_MESSAGE = [["\x1b[1;33m!! Quitting was blocked by <%s>
+!! Please be careful with this functionality as it might force you or your user to use the task manager to exit the application.
+!! If you know what you are doing and wish to stop receiving these messages, you can disable the \x1b[32mWARN_QUIT_BLOCK\x1b[33m flag at the top of the Object module file.
+\x1b[0m]]
+local STORE_HANDLER_SOURCE = true
+
+-- FLOOF: Fast Lua Object-Oriented Framework
+-- Copyright (c) 2026 Matus Kordos
+
 local PATH = (...):match("^(.+%.).-$") or ""
-local class = require(PATH .. "class")
-local array = require(PATH .. "array")
+local floof = require(PATH)
+local array, vec = floof.array, floof.vector
 
-local emptyf = function(...) return end
+local error, unpack = error, unpack
 
--- Object class definition
-local Object = class("Object")
+local Object = floof:class("Object")
 
--- Class-level constants and state
-Object.callbackNames = {
-    "resize", "update", "predraw", "draw", "postdraw", "quit",
-    "pressed", "moved", "released", "cancelled",
-    "scrolled", "hovered", "unhovered",
-    "mousedelta", "keypressed", "keyreleased", "textinput",
-    "filedropped", "directorydropped",
-    "joystickadded", "joystickremoved",
-    "joystickaxis", "joystickhat", "joystickpressed", "joystickreleased",
-    "gamepadaxis", "gamepadpressed", "gamepadreleased",
-    "created", "deleted", "added", "removed", "addedto", "removedfrom",
-    "activated", "deactivated", "childactivated", "childdeactivated",
-    "enabled", "disabled", "enter", "leave",
-}
+-- function pre-defs
 
-Object.activeCallbackNames = {
-    "mousedelta", "keypressed", "keyreleased", "textinput",
-    "filedropped", "directorydropped",
-    "joystickadded", "joystickremoved",
-    "joystickaxis", "joystickhat", "joystickpressed", "joystickreleased",
-    "gamepadaxis", "gamepadpressed", "gamepadreleased"
-}
+local registerHandler, removeHandler,
+      invokeHandlers,
+      handlerIterator, iterateHandlers
 
--- LÖVE callback constants
-Object.loveCallbackNames = {
-    "resize", "update", "draw", "quit",
-    "mousepressed", "mousereleased", "mousemoved", "wheelmoved",
-    "touchpressed", "touchreleased", "touchmoved", "touchcancelled",
-    "keypressed", "keyreleased", "textinput",
-    "filedropped", "directorydropped",
-    "joystickadded", "joystickremoved",
-    "joystickaxis", "joystickhat", "joystickpressed", "joystickreleased",
-    "gamepadaxis", "gamepadpressed", "gamepadreleased"
-}
+local adopt, orphan,
+      isChildOf,
+      ancestors,
+      delete
 
-Object.blockingCallbackNames = {
-    "keypressed", "keyreleased", "textinput",
-    "filedropped", "directorydropped",
-    "joystickadded", "joystickremoved",
-    "joystickaxis", "joystickhat", "joystickpressed", "joystickreleased",
-    "gamepadaxis", "gamepadpressed", "gamepadreleased"
-}
+local activeState, setActiveState
 
--- Convert to lookup tables
-for i, n in ipairs(Object.callbackNames) do
-    Object.callbackNames[n] = i
-end
-
-for i, n in ipairs(Object.activeCallbackNames) do
-    Object.activeCallbackNames[n] = i
-end
-
--- Root object reference
-Object._root = nil
-
-function Object.__get_root(self)
-    return Object._root
-end
-
-function Object.setRoot(obj, ...)
-    if obj ~= nil and not Object:isClassOf(obj) then
-        error(("Invalid object (got: %s (%s))"):format(tostring(obj), type(obj)), 2)
-    end
-    local previous = Object._root
-    if previous then
-        for i, p in ipairs(previous.presses) do
-            previous:cancelled(p)
-        end
-        previous:leave(obj, ...)
-    end
-    Object._root = obj
-    if obj then
-        obj:enter(previous, ...)
-    end
-end
-
--- Generalized position grabber (touch/mouse)
-local function getPressPosition(id)
-    if type(id) == "number" and love and love.mouse then
-        return love.mouse.getPosition()
-    elseif love and love.touch then
-        local s, x, y = pcall(love.touch.getPosition, id)
-        if s then
-            return x, y
-        end
-    end
-end
-
--- Constructor
-function Object:init(data)
-    self.callbacks = {}
+local setDepth,
+      moveInFront, moveBehind,
+      setFrontmost, setBackmost,
+      backwards, forwards,
+      backToFront, frontToBack,
+      forwardActive, backwardActive,
+      frontmostActive, backmostActive,
+      backwardInHierarchy, backwardInHierarchy,
+      hierarchyForwards, hierarchyBackwards
     
-    self._parent = nil
-    self._children = array()
-    self._childRegister = {}
-    self._z = 0
-    self._enabled = true
-    self._active = nil
-    self._presses = array()
-    self._pressedObject = {}
-    self._check = nil
-    self._lastHovered = nil
-    
+local getPointerPos,
+      stopHover,
+      checkHover, cancelHover
+
+local getPressPosition,
+      startPress, movePress, stopPress,
+      getPressTarget, setPressTarget,
+      pressPointer, movePointer, releasePointer
+
+local addListener, removeListener,
+      setListenerPriority,
+      listenBefore, listenAfter,
+      iterateListener, backtrackListener,
+      iterateListeners, backtrackListeners,
+      setListeningStatus,
+      listenerEvent
+
+local send, sendAll,
+      broadcast, broadcastAll
+
+local render
+
+-- private environment
+
+local Object_p = {
+    isLoaded = false, isInitialized = false,
+    frontmost = nil, backmost = nil,
+    isHovered = false,
+    ownPointer = false, pointerX = 0, pointerY = 0, hoverTarget = nil,
+    presses = array(), pressTargets = {},
+    firstListener = nil, lastListener = nil
+}
+local priv = setmetatable({[Object] = Object_p}, {__mode = "k"})
+local proxyOwnership = setmetatable({}, {__mode = "kv"})
+
+local function proxies(self)
+    local self_p = priv[self]
+    self_p.pressesProxy = self_p.presses:Proxy()
+    self_p.pressTargetsProxy = setmetatable({}, {__index = self_p.pressTargets, __newindex = setPressTarget, __metatable = {}})
+    proxyOwnership[self_p.pressTargetsProxy] = self
+end
+proxies(Object)
+
+local function initPrivInstance(self)
+    local p = {
+        isLoaded = false, isInitialized = false, isDeleted = false,
+        parent = nil, hierarchyLevel = 0,
+        activeSelf = true, isActive = true,
+        z = 0, backward = nil, forward = nil,
+        isHovered = false, behindHover = false,
+        isPressed = false, presses = array(), pressTargets = {},
+        ownPointer = false, pointerX = 0, pointerY = 0, hoverTarget = nil,
+        frontmost = nil, backmost = nil,
+        isListening = true, listenerPriority = 0,
+        previousListener = nil, nextListener = nil
+    }
+    priv[self] = p
+    proxies(self)
+    return p
+end
+
+local function setRelativeMode() end
+local function getMousePosition() return Object_p.pointerX, Object_p.pointerY end
+local function pushGraphics() end
+local function popGraphics() end
+
+-- helpers
+
+local function validateObject(self, name, acceptClass)
+    local typeStr = acceptClass and "Object instance or the class" or "Object instance"
+    if not (acceptClass and self == Object) and
+       not floof.instanceOf(self, Object)
+    then
+        error(("Invalid %s: %s expected, got %s"):format(name, typeStr, floof.typeOf(self)), 3)
+    elseif not priv[self] then
+        error(("Invalid %s: Object not properly constructed"):format(name), 3)
+    elseif priv[self].isDeleted then
+        error(("Invalid %s: deleted"):format(name), 3)
+    end
+end
+
+local function handleCallback(self, func, ...)
+    if floof.isCallable(self[func]) then
+        local s, e = pcall(self[func], self, ...)
+        if not s then error(e, 3) else return e end
+    else return self[func] end
+end
+
+local function privKeyIterator(k)
+    return floof.newIterator(
+        function(self)
+            return priv[self] and priv[self][k]
+        end
+    )
+end
+
+-- event handlers
+
+local eventHandlers = {} -- [name, firstHandler: {func, next}]
+
+function handlerIterator(event, curr)
+    if curr then
+        return curr.next
+    else
+        return eventHandlers[event]
+    end
+end
+function iterateHandlers(event)
+    return handlerIterator, event
+end
+function invokeHandlers(...)
+    local who, event
+    if floof.subclassOf(..., Object) or floof.instanceOf(..., Object) then
+        who, event = ...
+    else
+        event = ...
+    end
+    if type(event) ~= "string" then
+        error(("Invalid event: string expected, got %s"):format(floof.typeOf(event)), 2)
+    end
+    for hand in iterateHandlers(event) do
+        local s, e
+        if not who and not hand.who then
+            s, e = pcall(hand.func, select(2, ...))
+        elseif who == hand.who or floof.instanceOf(who, hand.who) then
+            s, e = pcall(hand.func, who, select(3, ...))
+        end
+        if s == false then error(e, 3) end
+    end
+end
+Object.invokeHandlers = function(...) return invokeHandlers(...) end
+
+function registerHandler(...)
+    local who, event, handler, priority
+    if floof.subclassOf(..., Object) or floof.instanceOf(..., Object) then
+        who, event, handler, priority = ...
+    else
+        event, handler, priority = ...
+    end
+    if type(event) ~= "string" then
+        error(("Invalid event: string expected, got %s"):format(floof.typeOf(event)), 2)
+    end
+    if not floof.isCallable(handler) then
+        error(("Invalid handler: callable expected, got %s"):format(floof.typeOf(handler)), 2)
+    end
+    if priority == nil then
+        priority = 0
+    elseif type(priority) ~= "number" then
+        error(("Invalid priority: number expected, got %s"):format(floof.typeOf(priority)), 2)
+    end
+    removeHandler(...)
+    local newHand = {func = handler, who = who, priority = priority}
+    if STORE_HANDLER_SOURCE then
+        local info = debug.getinfo(2, "Sl")
+        newHand.src = ("%s:%d"):format(info.short_src, info.currentline)
+    end
+    local hand = eventHandlers[event]
+    if not hand or priority > hand.priority then
+        eventHandlers[event] = newHand
+        newHand.next = hand
+        return
+    end
+    while hand.next do
+        if priority > hand.next.priority then
+            hand.next, newHand.next = newHand, hand.next
+            return
+        end
+        hand = hand.next
+    end
+    hand.next = newHand
+end
+Object.registerHandler = registerHandler
+
+function removeHandler(...)
+    local who, event, handler
+    if floof.subclassOf(..., Object) or floof.instanceOf(..., Object) then
+        who, event, handler = ...
+    else
+        event, handler = ...
+    end
+    if type(event) ~= "string" then
+        error(("Invalid event: string expected, got %s"):format(floof.typeOf(event)), 2)
+    end
+    local hand = eventHandlers[event]
+    if not hand then return end
+    if hand.func == handler and hand.who == who then
+        eventHandlers[event] = hand.next
+        return
+    end
+    while hand.next do
+        if hand.next.func == handler and hand.next.who == who then
+            hand.next = hand.next.next
+            return
+        end
+    end
+end
+Object.removeHandler = removeHandler
+
+-- public interface
+
+function Object:__init(data)
+    if not floof.instanceOf(self, Object) then
+        error(("Invalid caller: Object expected, got %s"):format(floof.typeOf(self)), 2)
+    end
+    if priv[self] then error("Invalid caller: already initialized", 2) end
+    if data ~= nil and floof.typeOf(data) ~= "table" then
+        error(("Invalid constructor data: table expected, got %s"):format(floof.typeOf(data)), 2)
+    end
+    local self_p = initPrivInstance(self)
+    invokeHandlers(self, "constructed")
+    handleCallback(self, "constructed")
     if data then
         for k, v in pairs(data) do
-            self[k] = v
+            floof.safeInvoke(floof.set, self, k, v)
         end
     end
-    
-    if not self._parent and Object.root then
-        self.parent = Object.root
+    if not self_p.parent then floof.safeInvoke(adopt, self) end
+    self_p.isInitialized = true
+    invokeHandlers(self, "initialized")
+    handleCallback(self, "initialized")
+    if Object_p.isLoaded then
+        self_p.isLoaded = true
+        invokeHandlers(self, "load", Object_p.arg, Object_p.unfilteredArg)
+        handleCallback(self, "load", Object_p.arg, Object_p.unfilteredArg)
     end
-    
-    -- Only call resize if love.graphics is available
-    if love and love.graphics then
-        self:resize(love.graphics.getDimensions())
-    end
-end
-
-function Object:setup()
-    self.callbacks = {}
-end
-
--- Core callback implementations
-Object.callbacks = {}
-function Object:__set(k, v)
-    if Object.callbackNames[k] then
-        if self == Object then
-            Object.callbacks[k] = v
-        else
-            self.callbacks = self.callbacks or {}
-            self.callbacks[k] = v
-        end
+    if self_p.parent then
+        invokeHandlers(self, "addedto", self_p.parent)
+        handleCallback(self, "addedto", self_p.parent)
+        invokeHandlers(self_p.parent, "added", self)
+        handleCallback(self_p.parent, "added", self)
     else
-        rawset(self, k, v)
+        invokeHandlers(self, "orphaned")
+        handleCallback(self, "orphaned")
+    end
+    if self_p.isActive then
+        invokeHandlers(self, "activated")
+        handleCallback(self, "activated")
+        floof.safeInvoke(checkHover, self)
     end
 end
 
-function Object:getCallback(k)
-    local f, c = self.callbacks and self.callbacks[k], self.class
-    while c and c ~= Object and not f do
-        f = c.callbacks and c.callbacks[k]
-        c = c.super
-    end
-    return f or emptyf
-end
+function Object:isConstructed() return priv[self] ~= nil end
 
-Object.wrappers = {}
+local getters = {
+    isLoaded = priv, isInitialized = priv, isDeleted = priv,
+    parent = priv, hierarchyLevel = priv,
+    activeSelf = priv, isActive = priv,
+    z = priv, backward = priv, forward = priv,
+    isHovered = priv, behindHover = priv,
+    ownPointer = priv, pointerX = priv, pointerY = priv, hoverTarget = priv,
+    isPressed = priv,
+    presses = function(self) return priv[self].pressesProxy end,
+    pressTargets = function(self) return priv[self].pressTargetsProxy end,
+    frontmost = priv, backmost = priv,
+    isListening = priv, listenerPriority = priv,
+    previousListener = priv, nextListener = priv,
+    firstListener = priv, lastListener = priv
+}
 function Object:__get(k)
-    if Object.callbackNames[k] then
-        if not Object.wrappers[k] then
-            Object.wrappers[k] = function(self, ...)
-                if not Object:isClassOf(self) then error(("Function %q must be called on an object (got: %s (%s))"):format(k, tostring(self), type(self)), 2) end
-                local old = Object.callbacks[k] or emptyf
-                local f = self:getCallback(k)
-                local v = f and f(self, ...)
-                if k == "moved" then
-                    local r = old(self, ...)
-                    return v or r
-                elseif k == "pressed" or k == "released" or Object.activeCallbackNames[k] then
-                    return (v ~= false) and old(self, ...)
-                else
-                    old(self, ...)
-                    return v
+    if priv[self] and getters[k] then
+        if getters[k] == priv then
+            return priv[self][k]
+        else
+            return floof.safeReturn(getters[k], self)
+        end
+    end
+end
+
+local setters = {}
+function Object:__set(k, v)
+    if priv[self] and (setters[k] or getters[k]) then
+        if not setters[k] then
+            error(("Cannot modify private field %q"):format(k), 2)
+        else
+            return floof.safeReturn(setters[k], self, v)
+        end
+    else rawset(self, k, v) end
+end
+
+-- main loop
+
+local globalEvents = { -- [name, callOnInactive]
+    resize = true, displayrotated = true,
+    focus = false, mousefocus = false,
+    visible = false, exposed = false, occluded = false,
+    localechanged = true
+}
+
+local touchPresses = {}
+
+local function quit(...)
+    for hand in iterateHandlers("quit") do
+        if floof.safeInvoke(hand.func, ...) then
+            local r = "handler"
+            if hand.src then
+                r = r .. (" @ %s"):format(hand.src)
+            end
+            return r
+        end
+    end
+    for obj in hierarchyForwards(Object) do
+        if handleCallback(obj, "quit", ...) then
+            return tostring(obj)
+        end
+    end
+    if floof.safeInvoke(love.quit, ...) then
+        return "love"
+    end
+    for obj in hierarchyForwards(Object) do
+        invokeHandlers(obj, "finalize")
+        handleCallback(obj, "finalize")
+    end
+end
+
+local function handleEvent(name, ...)
+    if not name then return true end
+    if name == "quit" then
+        local block = floof.safeInvoke(quit, ...)
+        if not block then
+            return false, ... or 0
+        elseif WARN_QUIT_BLOCK then
+            print((QUIT_BLOCK_MESSAGE):format(blockQuit))
+        end
+    elseif name == "mousepressed" then
+        local x, y, button, touch = ...
+        if button and not touch then
+            if not Object_p.ownPointer then
+                floof.safeInvoke(startPress, Object, button, x, y, select(5, ...))
+            else
+                floof.safeInvoke(listenerEvent, Object, "mousepressed", button, select(5, ...))
+            end
+        end
+    elseif name == "mousemoved" then
+        local x, y, dx, dy, touch = ...
+        if not touch then
+            if not Object_p.ownPointer then
+                floof.safeInvoke(movePointer, Object, x, y, dx, dy, select(6, ...))
+            else
+                floof.safeInvoke(listenerEvent, Object, "mousemoved", dx, dy, select(6, ...))
+            end
+        end
+    elseif name == "mousereleased" then
+        local x, y, button, touch = ...
+        if button and not touch then
+            if not Object_p.ownPointer then
+                floof.safeInvoke(stopPress, Object, button, x, y, true, select(5, ...))
+            else
+                floof.safeInvoke(listenerEvent, Object, "mousereleased", button, select(5, ...))
+            end
+        end
+    elseif name == "wheelmoved" then
+        if not Object_p.ownPointer then
+            local curr = Object_p.hoverTarget
+            while curr do
+                local curr_p = priv[curr]
+                invokeHandlers(curr, "scrolled", ...)
+                if handleCallback(curr, "scrolled", ...)
+                or curr_p.ownPointer
+                then break end
+                curr = curr_p.hoverTarget
+            end
+        else
+            floof.safeInvoke(listenerEvent, Object, "wheelmoved", ...)
+        end
+    elseif name == "touchpressed" then
+        local id, x, y, dx, dy = ...
+        touchPresses[id] = vec(x, y)
+        floof.safeInvoke(startPress, Object, id, x, y, select(6, ...))
+    elseif name == "touchmoved" then
+        local id, x, y, dx, dy = ...
+        touchPresses[id] = vec(x, y)
+        floof.safeInvoke(movePress, Object, ...)
+    elseif name == "touchreleased" then
+        local id, x, y, dx, dy = ...
+        floof.safeInvoke(stopPress, Object, id, x, y, true, select(6, ...))
+        touchPresses[a] = nil
+    elseif globalEvents[name] ~= nil then
+        if name == "mousefocus" then
+            Object_p.isHovered = ...
+            if not ... and not Object_p.ownPointer and Object_p.hoverTarget then
+                local hov = Object_p.hoverTarget
+                Object_p.hoverTarget = nil
+                floof.safeInvoke(stopHover, hov, Object_p.pointerX, Object_p.pointerY)
+            elseif ... and not Object_p.ownPointer then
+                for ch in frontToBack(Object) do
+                    if floof.safeInvoke(checkHover, ch) then break end
                 end
             end
         end
-        return Object.wrappers[k]
-    end
-end
-
-function Object:resize(w, h)
-    for i, e in ipairs(self._children) do
-        e:resize(w, h)
-    end
-end
-
-function Object:update(dt)
-    for i, e in ipairs(self._children) do
-        if e.isEnabled then
-            e:update(dt)
-        end
-    end
-    if self._lastHovered ~= self.hoveredChild then
-        if self._lastHovered then
-            self._lastHovered:unhovered()
-        end
-        if self.hoveredChild then
-            self.hoveredChild:hovered()
-        end
-        self._lastHovered = self.hoveredChild
-    end
-end
-
-function Object:quit()
-    for i, e in ipairs(self._children) do
-        e:quit()
-    end
-end
-
-function Object:pressed(x, y, id)
-    self._presses:append(id)
-    for i, e in ipairs(self._children) do
-        if e.isEnabled and e:check(x, y) and e:pressed(x, y, id) ~= false then
-            self._pressedObject[id] = e
-            return true
-        end
-    end
-end
-
-function Object:moved(x, y, dx, dy, id)
-    if self._pressedObject[id] then
-        if self._pressedObject[id]:moved(x, y, dx, dy, id) ~= true and not self._pressedObject[id]:check(x, y) then
-            self:setPressTarget(id)
-        end
-        return true
-    end
-end
-
-function Object:released(x, y, id)
-    for i, p in ipairs(self._presses) do
-        if p == id then
-            self._presses:pop(i)
-            break
-        end
-    end
-    if self._pressedObject[id] then
-        self._pressedObject[id]:released(x, y, id)
-        self._pressedObject[id] = nil
-        return true
-    end
-end
-
-function Object:cancelled(id)
-    for i, p in ipairs(self._presses) do
-        if p == id then
-            self._presses:pop(i)
-            break
-        end
-    end
-    if self._pressedObject[id] then
-        self._pressedObject[id]:cancelled(id)
-        self._pressedObject[id] = nil
-    end
-end
-
-function Object:scrolled(t)
-    if self.isHovered and self.hoveredChild then
-        self.hoveredChild:scrolled(t)
-        return true
-    end
-end
-
--- Active callback implementations
-for i, n in ipairs(Object.activeCallbackNames) do
-    Object[n] = function(self, ...)
-        if self._active and self._active.isEnabled then
-            self._active[n](self._active, ...)
-            return true
-        end
-        return false
-    end
-end
-
-Object.wrappers.draw = function(self, ...)
-    if not Object:isClassOf(self) then error(("Function \"draw\" must be called on an object (got: %s (%s))"):format(tostring(self), type(self)), 2) end
-    local pre, draw, post = self:getCallback("predraw"), self:getCallback("draw"), self:getCallback("postdraw")
-    if love and love.graphics then
-        love.graphics.push("all")
-    end
-    if pre then
-        pre(self, ...)
-    end
-    local drawn = false
-    for i = #self._children, 1, -1 do
-        local e = self._children[i]
-        if e._z >= 0 and not drawn then
-            if not drawn and draw then
-                draw(self, ...)
-            end
-            drawn = true
-        end
-        if e.isEnabled then
-            if love and love.graphics then
-                love.graphics.push("all")
-            end
-            e:draw(...)
-            if love and love.graphics then
-                love.graphics.pop()
+        invokeHandlers(name, ...)
+        for obj in hierarchyForwards(Object) do
+            if (globalEvents[name] or priv[obj].isActive) then
+                invokeHandlers(obj, name, ...)
+                handleCallback(obj, name, ...)
             end
         end
-    end
-    if not drawn and draw then
-        draw(self, ...)
-    end
-    if post then
-        post(self, ...)
-    end
-    if love and love.graphics then
-        love.graphics.pop()
-    end
-end
-
--- Object methods
-function Object:updateChildStatus(object)
-    if not Object:isClassOf(object) then
-        error(("Invalid object (got: %s (%s))"):format(tostring(object), type(object)), 3)
-    end
-    if object._parent == self then
-        self._childRegister[object] = true
+        floof.safeInvoke(love[name], ...)
     else
-        self._childRegister[object] = nil
-        for i, id in ipairs(object._presses) do
-            self._pressedObject[id] = nil
+        floof.safeInvoke(listenerEvent, Object, name, ...)
+    end
+end
+
+function Object.initialize(arg)
+    if not love then return end
+
+    if arg then
+        Object_p.unfilteredArg, Object_p.arg = arg, love.arg.parseGameArguments(arg)
+    end
+
+    if love.mouse then
+        setRelativeMode, setMousePosition = love.mouse.setRelativeMode, love.mouse.setPosition
+        function love.mouse.setRelativeMode(value)
+            floof.safeInvoke(setters.ownPointer, Object, value)
+        end
+        Object_p.pointerX, Object_p.pointerY = love.mouse.getPosition()
+        if Object_p.ownPointer then setRelativeMode(true)
+        elseif love.mouse.getRelativeMode() then Object_p.ownPointer = true end
+    end
+
+    if love.graphics then
+        pushGraphics, popGraphics = love.graphics.push, love.graphics.pop
+    end
+
+    function love.run()
+        Object_p.isLoaded = true
+        for obj in hierarchyForwards(Object) do
+            priv[obj].isLoaded = true
+            invokeHandlers(obj, "load", Object_p.arg, Object_p.unfilteredArg)
+            handleCallback(obj, "load", Object_p.arg, Object_p.unfilteredArg)
+        end
+        if love.timer then love.timer.step() end
+        local dt = 0
+        return function()
+            -- events
+            if love.event then
+                love.event.pump()
+                repeat
+                    local s, r = floof.safeInvoke(handleEvent, love.event.poll_i())
+                    if s == false then return r end
+                until s
+            end
+            -- update
+            if love.timer then dt = love.timer.step() end
+            floof.safeInvoke(broadcast, Object, "update", dt)
+            floof.safeInvoke(love.update, dt)
+            -- draw
+            if love.graphics and love.graphics.isActive() then
+                love.graphics.origin()
+                love.graphics.clear(love.graphics.getBackgroundColor())
+                floof.safeInvoke(render, Object)
+                love.graphics.present()
+            end
+            -- timer
+            if love.timer then love.timer.sleep(0.001) end
         end
     end
-    self:refreshChildren()
 end
 
-function Object:refreshChildren()
-    self._children = array()
-    for c in pairs(self._childRegister) do
-        self._children:append(c)
+-- hierarchy
+
+function adopt(self, parent)
+    validateObject(self, "caller")
+    local self_p = priv[self]
+    if self_p.isInitialized and self_p.parent == parent then return end
+    if parent ~= nil then validateObject(parent, "value") end
+    if parent and isChildOf(parent, self) then
+        error("Invalid value: cannot be a descendant of the Object", 2)
     end
-    self._children:sort(function(a, b) return a._z > b._z end)
+    if self_p.isInitialized then floof.safeInvoke(orphan, self) end
+    local parent_p = priv[parent or Object]
+    if parent and not parent_p.isActive and self_p.isActive then
+        floof.safeInvoke(activeState, self, false)
+    elseif not parent and self_p.activeSelf and not self_p.isActive then
+        floof.safeInvoke(activeState, self, true)
+    end
+    self_p.behindHover = false
+    if not parent_p.frontmost then
+        parent_p.frontmost, parent_p.backmost = self, self
+        floof.safeInvoke(checkHover, self)
+    else
+        for sib in forwards(parent_p.frontmost, true) do
+            local sib_p = priv[sib]
+            if sib_p.z <= self_p.z then
+                if not sib_p.backward then
+                    self_p.forward, sib_p.backward, parent_p.frontmost = sib, self, self
+                else
+                    self_p.backward, self_p.forward, priv[sib_p.backward].forward, sib_p.backward = sib_p.backward, sib, self, self
+                end
+                floof.safeInvoke(checkHover, self)
+                break
+            elseif not sib_p.forward then
+                self_p.backward, sib_p.forward, parent_p.backmost = sib, self, self
+                floof.safeInvoke(checkHover, self)
+                break
+            end
+            if sib_p.isHovered then self_p.behindHover = true end
+        end
+    end
+    self_p.parent = parent
+    if parent then
+        self_p.hierarchyLevel = parent_p.hierarchyLevel + 1
+        if self_p.isInitialized then
+            invokeHandlers(self, "addedto", parent)
+            handleCallback(self, "addedto", parent)
+            invokeHandlers(parent, "added", self)
+            handleCallback(parent, "added", self)
+        end
+    else
+        self_p.hierarchyLevel = 0
+        if self_p.isInitialized then
+            invokeHandlers(self, "orphaned")
+            handleCallback(self, "orphaned")
+        end
+    end
+end
+Object.setParent, setters.parent = adopt, adopt
+
+function orphan(self)
+    local self_p = priv[self]
+    local parent = self_p.parent or Object
+    local parent_p = priv[parent]
+    for i, press in self_p.presses:iterate() do
+        parent_p.pressTargets[press] = nil
+        floof.safeInvoke(stopPress, self, press, getPressPosition(self, press))
+    end
+    if parent and self_p.isInitialized then
+        invokeHandlers(self, "removedfrom", parent)
+        handleCallback(self, "removedfrom", parent)
+        invokeHandlers(parent, "removed", self)
+        handleCallback(parent, "removed", self)
+    end
+    floof.safeInvoke(cancelHover, self)
+    if self_p.backward then
+        priv[self_p.backward].forward = self_p.forward
+    else
+        parent_p.frontmost = self_p.forward
+    end
+    if self_p.forward then
+        priv[self_p.forward].backward = self_p.backward
+    else
+        parent_p.backmost = self_p.backward
+    end
+    self_p.parent, self_p.backward, self_p.forward = nil
+    self_p.hierarchyLevel = 0
 end
 
-function Object:isChildOf(object)
-    if not Object:isClassOf(object) then
-        error(("Invalid object (got: %s (%s))"):format(tostring(object), type(object)), 3)
+function delete(self)
+    validateObject(self, "caller")
+    local self_p = priv[self]
+    floof.safeInvoke(orphan, self)
+    if self_p.isInitialized then
+        invokeHandlers(self, "deleted")
+        handleCallback(self, "deleted")
     end
-    local e = self._parent
-    while e do
-        if e == object then return true end
-        e = e._parent
-    end
+    priv[self].isDeleted = true
+end
+Object.delete = delete
+
+function isChildOf(self, other)
+    validateObject(self, "caller")
+    validateObject(other, "value")
+    for p in ancestors(self, true) do if p == other then return true end end
     return false
 end
+Object.isChildOf = isChildOf
 
-function Object:setPressTarget(id, object)
-    if object ~= nil and not Object:isClassOf(object) then
-        error(("Invalid object (got: %s (%s))"):format(tostring(object), type(object)), 3)
+ancestors = privKeyIterator("parent")
+Object.ancestors = ancestors
+
+-- state
+
+function activeState(self, state)
+    local curr, q, tail = self, {}, self
+    while curr do
+        local curr_p = priv[curr]
+        if curr_p.isActive ~= state then
+            curr_p.isActive = state
+            if curr_p.isInitialized then
+                invokeHandlers(self, state and "activated" or "deactivated")
+                handleCallback(self, state and "activated" or "deactivated")
+            end
+            for ch in frontToBack(curr) do
+                q[tail], tail = ch, ch
+            end
+        end
+        curr = q[curr]
     end
-    if object ~= nil and object._parent ~= self then
-        error(("Target must be a child of this object"), 3)
+end
+
+function setActiveState(self, state)
+    validateObject(self, "caller")
+    if type(state) ~= "boolean" then
+        error(("Invalid value: boolean expected, got %s"):format(floof.typeOf(state)), 2)
     end
-    local p = self._pressedObject[id]
-    if p == object then return end
-    if p then
-        p:cancelled(id)
+    local self_p = priv[self]
+    if self_p.activeSelf == state then return end
+    self_p.activeSelf = state
+    local parent_p = priv[self_p.parent] or Object_p
+    if self_p.parent and not parent_p.isActive then return end
+    if not state then
+        for i, press in self.presses:iterate() do
+            parent_p.pressTargets[press] = nil
+            floof.safeInvoke(stopPress, self, press, getPressPosition(self, press))
+        end
     end
-    local x, y = getPressPosition(id)
-    if object and object:pressed(x, y, id) ~= false then
-        self._pressedObject[id] = object
+    floof.safeInvoke(activeState, self, state)
+    if state then floof.safeInvoke(checkHover, self)
+    elseif self_p.isHovered then floof.safeInvoke(cancelHover, self) end
+end
+Object.setActiveState, setters.activeSelf = setActiveState, setActiveState
+
+-- depth
+
+function setDepth(self, z)
+    validateObject(self, "caller")
+    if type(z) ~= "number" then
+        error("Value must be a number", 2)
+    end
+    local self_p = priv[self]
+    self_p.z = z
+    local parent = self_p.parent or Object
+    local parent_p = priv[parent]
+    if self_p.backward and priv[self_p.backward].z <= z then
+        for sib in backwards(self) do
+            local sib_p = priv[sib]
+            if sib_p.z > z then break end
+            self_p.backward, sib_p.forward = sib_p.backward, self_p.forward
+            if sib_p.backward then
+                priv[sib_p.backward].forward = self
+            else
+                parent_p.frontmost = self
+            end
+            if self_p.forward then
+                priv[self_p.forward].backward = sib
+            else
+                parent_p.backmost = sib
+            end
+            sib_p.backward, self_p.forward = self, sib
+            if self_p.isHovered then
+                sib_p.behindHover = true
+            elseif sib_p.isHovered then
+                self_p.behindHover = false
+                floof.safeInvoke(checkHover, self)
+            end
+        end
+    elseif self_p.forward and priv[self_p.forward].z > z then
+        for sib in forwards(self) do
+            local sib_p = priv[sib]
+            if sib_p.z <= z then break end
+            sib_p.backward, self_p.forward = self_p.backward, sib_p.forward
+            if self_p.backward then
+                priv[self_p.backward].forward = sib
+            else
+                parent_p.frontmost = sib
+            end
+            if sib_p.forward then
+                priv[sib_p.forward].backward = self
+            else
+                parent_p.backmost = self
+            end
+            self_p.backward, sib_p.forward = sib, self
+            if self_p.isHovered then
+                sib_p.behindHover = false
+                floof.safeInvoke(checkHover, sib)
+            elseif sib_p.isHovered then
+                self_p.behindHover = true
+            end
+        end
+    end
+    if self_p.isInitialized then
+        invokeHandlers(self, "depthchanged")
+        handleCallback(self, "depthchanged")
+    end
+end
+Object.setDepth, setters.z = setDepth, setDepth
+
+function moveInFront(self, forward)
+    validateObject(self, "caller")
+    if forward ~= nil then validateObject(forward, "value") end
+    if self == forward then error("Invalid value: equal to caller", 2) end
+    local self_p, backward_p = priv[self], priv[forward]
+    if forward and backward_p.parent ~= self_p.parent then
+        error("Invalid value: object must be a sibling of the caller", 2)
+    end
+    if self_p.forward == forward then return end
+    local parent_p = priv[self_p.parent] or Object_p
+    local p_backward = self_p.forward
+    local x, y = parent_p.pointerX, parent_p.pointerY
+    if self_p.backward then
+        priv[self_p.backward].forward = self_p.forward
     else
-        self._pressedObject[id] = nil
+        parent_p.frontmost = self_p.forward
+    end
+    if self_p.forward then
+        priv[self_p.forward].backward = self_p.backward
+    else
+        parent_p.backmost = self_p.backward
+    end
+    if forward then
+        self_p.z = backward_p.z
+        if backward_p.backward then
+            priv[backward_p.backward].forward = self
+        else
+            parent_p.frontmost = self
+        end
+        backward_p.backward = self
+    else
+        self_p.z = priv[parent_p.backmost].z
+        priv[parent_p.backmost].forward, parent_p.backmost = self, self
+    end
+    if self_p.isHovered and backward_p.behindHover then
+        for sib in forwards(p_backward, true) do
+            if sib == self then break end
+            local sib_p = priv[sib]
+            sib_p.behindHover = false
+            if floof.safeInvoke(checkHover, sib) then break end
+        end
+    elseif self_p.behindHover and not backward_p.behindHover then
+        self_p.behindHover = false
+        floof.safeInvoke(checkHover, self)
+    end
+    if self_p.isInitialized then
+        invokeHandlers(self, "depthchanged")
+        handleCallback(self, "depthchanged")
     end
 end
+Object.moveInFront, setters.forward = moveInFront, moveInFront
 
-function Object:getPressPosition(i)
-    if i == nil then
-        i = self._presses.length
+function moveBehind(self, backward)
+    validateObject(self, "caller")
+    if backward ~= nil then validateObject(backward, "value") end
+    if self == backward then error("Invalid value: equal to caller", 2) end
+    local self_p, forward_p = priv[self], priv[backward]
+    if backward and forward_p.parent ~= self_p.parent then
+        error("Invalid value: object must be a sibling of the caller", 2)
     end
-    if not self._presses[i] then
-        error(("Invalid index (got: %s (%s))"):format(tostring(i), type(i)), 3)
+    if self_p.backward == backward then return end
+    local parent_p = priv[self_p.parent] or Object_p
+    local p_backward = self_p.forward
+    local x, y = parent_p.pointerX, parent_p.pointerY
+    if self_p.backward then
+        priv[self_p.backward].forward = self_p.forward
+    else
+        parent_p.frontmost = self_p.forward
     end
-    return getPressPosition(self._presses[i])
+    if self_p.forward then
+        priv[self_p.forward].backward = self_p.backward
+    else
+        parent_p.backmost = self_p.backward
+    end
+    if backward then
+        self_p.z = forward_p.z
+        if forward_p.forward then
+            priv[forward_p.forward].backward = self
+        else
+            parent_p.backmost = self
+        end
+        forward_p.forward = self
+    else
+        self_p.z = priv[parent_p.frontmost].z
+        priv[parent_p.frontmost].backward, parent_p.frontmost = self, self
+    end
+    if self_p.isHovered and forward_p.behindHover then
+        for sib in forwards(p_backward, true) do
+            if sib == self then break end
+            local sib_p = priv[sib]
+            sib_p.behindHover = false
+            if floof.safeInvoke(checkHover, sib) then break end
+        end
+    elseif forward_p.isHovered or forward_p.behindHover then
+        self_p.behindHover = true
+    end
+    if self_p.isInitialized then
+        invokeHandlers(self, "depthchanged")
+        handleCallback(self, "depthchanged")
+    end
 end
+Object.moveBehind, setters.backward = moveBehind, moveBehind
 
--- Convenience methods
-function Object:addChild(child)
-    if not Object:isClassOf(child) then
-        error(("Invalid object (got: %s (%s))"):format(tostring(child), type(child)), 3)
+function setFrontmost(self, frontmost)
+    validateObject(self, "caller", true)
+    validateObject(frontmost, "value")
+    local self_p, frontmost_p = priv[self], priv[frontmost]
+    if frontmost.parent ~= self then
+        error("Invalid value: object must be a sibling of the caller", 2)
     end
-    child.parent = self
-    return child
+    if self_p.frontmost == frontmost then return end
+    floof.safeInvoke(moveInFront, frontmost, self_p.frontmost)
 end
+Object.moveToFront, setters.frontmost = setFrontmost, setFrontmost
 
-function Object:removeChild(child)
-    if not Object:isClassOf(child) then
-        error(("Invalid object (got: %s (%s))"):format(tostring(child), type(child)), 3)
+function setBackmost(self, backmost)
+    validateObject(self, "caller", true)
+    validateObject(backmost, "value")
+    local self_p, backmost_p = priv[self], priv[backmost]
+    if bacmost_p.parent ~= self then
+        error("Invalid value: object must be a sibling of the caller", 2)
     end
-    if child._parent == self then
-        child.parent = nil
-    end
-    return child
+    if self_p.backmost == backmost then return end
+    floof.safeInvoke(moveBehind, backmost, self_p.backmost)
 end
+Object.moveToBack, setters.backmost = setBackmost, setBackmost
 
-function Object:setParent(parent)
-    self.parent = parent
+function backwardActive(self)
+    repeat
+        self = priv[self].backward
+    until not self or priv[self].isActive
     return self
 end
+function forwardActive(self)
+    repeat
+        self = priv[self].forward
+    until not self or priv[self].isActive
+    return self
+end
+getters.backwardActive, getters.forwardActive = backwardActive, forwardActive
 
--- Messaging system
-function Object:call(message, ...)
-    if type(self[message]) == "function" then
-        return self[message](self, ...)
+function frontmostActive(self)
+    local frontmost = priv[self].frontmost
+    while frontmost and not priv[frontmost].isActive do
+        frontmost = priv[frontmost].forward
+    end
+    return frontmost
+end
+function backmostActive(self)
+    local backmost = priv[self].backmost
+    while backmost and not priv[backmost].isActive do
+        backmost = priv[backmost].backward
+    end
+    return backmost
+end
+getters.frontmostActive, getters.backmostActive = frontmostActive, backmostActive
+
+backwards = privKeyIterator("backward")
+function backToFront(self)
+    if priv[self] then
+        return backwards(priv[self].backmost, true)
+    else
+        return rawget, {}
     end
 end
+Object.backwards, Object.backToFront = backwards, backToFront
 
-function Object:send(message, ...)
-    for i, child in ipairs(self._children) do
-        if child.isEnabled then
-            child:call(message, ...)
+forwards = privKeyIterator("forward")
+function frontToBack(self)
+    if priv[self] then
+        return forwards(priv[self].frontmost, true)
+    else
+        return rawget, {}
+    end
+end
+Object.forwards, Object.frontToBack = forwards, frontToBack
+
+function backwardInHierarchy(self, start)
+    if not priv[self] then return end
+    if priv[self].backmost then return priv[self].backmost end
+    for obj in ancestors(self) do
+        if obj == start then return end
+        if priv[obj].backward then return priv[obj].backward end
+    end
+end
+hierarchyBackwards = floof.newIterator(backwardInHierarchy)
+Object.hierarchyBackwards, Object.backwardInHierarchy = hierarchyBackwards, backwardInHierarchy
+
+function forwardInHierarchy(self, start)
+    if not priv[self] then return end
+    if priv[self].frontmost then return priv[self].frontmost end
+    for obj in ancestors(self) do
+        if obj == start then return end
+        if priv[obj].forward then return priv[obj].forward end
+    end
+end
+hierarchyForwards = floof.newIterator(forwardInHierarchy)
+Object.hierarchyForwards, Object.forwardInHierarchy = hierarchyForwards, forwardInHierarchy
+
+-- pointers
+
+function getPointerPos(self)
+    validateObject(self, "caller", true)
+    local parent_p = priv[priv[self].parent] or Object_p
+    return parent_p.pointerX, parent_p.pointerY
+end
+Object.getPointerPosition = getPointerPos
+
+function getters:parentPointerX() return (priv[priv[self].parent] or Object_p).pointerX end
+function getters:parentPointerY() return (priv[priv[self].parent] or Object_p).pointerY end
+
+function stopHover(self, ...)
+    invokeHandlers(self, "unhovered", ...)
+    handleCallback(self, "unhovered", ...)
+    local curr, curr_p = self, priv[self]
+    while curr do
+        curr_p.isHovered = false
+        if curr_p.ownPointer then break end
+        local hov = curr_p.hoverTarget
+        curr_p.hoverTarget = nil
+        if not hov then break end
+        for sib in forwards(hov) do
+            priv[sib].behindHover = false
         end
+        invokeHandlers(hov, "unhovered", ...)
+        handleCallback(hov, "unhovered", ...)
+        curr, curr_p = hov, priv[hov]
     end
 end
 
-function Object:broadcast(message, ...)
-    for i, child in ipairs(self._children) do
-        if child.isEnabled then
-            if child:call(message, ...) ~= false then
-                child:broadcast(message, ...)
+function checkHover(self, ...)
+    validateObject(self, "caller")
+    local self_p = priv[self]
+    local parent = self_p.parent
+    local parent_p = priv[parent] or Object_p
+    local x, y = parent_p.pointerX, parent_p.pointerY
+    if not self_p.isInitialized or not self_p.isActive or
+       parent and (not parent_p.isHovered or parent_p.hoverTarget == false) or
+       self_p.isHovered or self_p.behindHover or
+       not handleCallback(self, "check", x, y)
+    then
+        return false
+    end
+    local old = parent_p.hoverTarget
+    local v = handleCallback(self, "hovered", x, y, ...)
+    if v == false then return false end
+    self_p.isHovered = true
+    parent_p.hoverTarget = self
+    invokeHandlers(self, "hovered", x, y, ...)
+    if old then floof.safeInvoke(stopHover, old, x, y, ...) end
+    for sib in forwards(self) do
+        local sib_p = priv[sib]
+        if sib_p.behindHover then break end
+        sib_p.behindHover = true
+    end
+    if v == true then self_p.hoverTarget = false return true end
+    local curr, curr_p = self, self_p
+    repeat
+        local new, new_p
+        for ch in frontToBack(curr) do
+            local ch_p = priv[ch]
+            if ch_p.isActive and handleCallback(ch, "check", x, y) then
+                local v = handleCallback(ch, "hovered", x, y, ...)
+                if v ~= false then
+                    curr_p.hoverTarget = ch
+                    ch_p.isHovered = true
+                    for sib in forwards(ch) do
+                        local sib_p = priv[sib]
+                        if sib_p.behindHover then break end
+                        sib_p.behindHover = true
+                    end
+                    invokeHandlers(ch, "hovered", x, y, ...)
+                    if v == true then ch_p.hoverTarget = false end
+                    new, new_p = ch, ch_p
+                    break
+                end
             end
         end
-    end
-end
-
-function Object:broadcastActive(message, ...)
-    if self.activeChild and self.activeChild.isEnabled then
-        if self.activeChild:call(message, ...) ~= false then
-            self.activeChild:broadcastActive(message, ...)
-        end
-    end
-end
-
--- Property getters and setters
-Object.__get_parent = function(self)
-    return self._parent
-end
-
-Object.__set_parent = function(self, value)
-    if self._parent == value then return end
-    if value ~= nil and not Object:isClassOf(value) then
-        error(("Parent must be an object (got: %s (%s))"):format(tostring(value), type(value)), 3)
-    end
-    if self == value then
-        error(("Cannot assign object as its own parent"), 3)
-    end
-    if value and value:isChildOf(self) then
-        error(("Cannot assign object as the parent of its current parent"), 3)
-    end
-    -- deactivate in all parent objects
-    local e = self._parent
-    while e do
-        if value and value:isChildOf(e) then break end
-        if e.activeChild == self then
-            e.activeChild = nil
-        end
-        e = e._parent
-    end
-    -- cancel all presses
-    for i, p in ipairs(self._presses) do
-        self:cancelled(p)
-        self._parent:setPressTarget(p)
-    end
-    local p = self._parent
-    self._parent = value
-    if p then
-        p:updateChildStatus(self)
-        p:removed(self)
-        self:removedfrom(p)
-    end
-    if value then
-        value:updateChildStatus(self)
-        value:added(self)
-        self:addedto(value)
-    end
-end
-
-Object.__get_z = function(self)
-    return self._z
-end
-
-Object.__set_z = function(self, value)
-    if type(value) ~= "number" then
-        error(("Z value must be a number (got: %s (%s))"):format(tostring(value), type(value)), 3)
-    end
-    self._z = value
-    if self._parent then self._parent:refreshChildren() end
-end
-
-Object.__get_enabledSelf = function(self)
-    return self._enabled
-end
-
-Object.__set_enabledSelf = function(self, value)
-    if type(value) ~= "boolean" then
-        error(("Enabled state must be a boolean value (got: %s (%s))"):format(tostring(value), type(value)), 3)
-    end
-    if self._enabled == value then return end
-    self._enabled = value
-    if value then
-        self:enabled()
-        self:broadcast("enabled")
-    else
-        self:disabled()
-        self:broadcast("disabled")
-        for i, p in ipairs(self._presses) do
-            self:cancelled(p)
-            self._parent:setPressTarget(p)
-        end
-    end
-end
-Object.__get_isEnabled = function(self)
-    if not self._enabled then
-        return false
-    elseif self._parent then
-        return self._parent.isEnabled
-    end
+        curr, curr_p = new, new_p
+    until not curr or curr_p.ownPointer or curr_p.hoverTarget == false
     return true
 end
+Object.checkHover = checkHover
 
-Object.__get_activeChild = function(self)
-    return self._active
-end
-
-Object.__set_activeChild = function(self, value)
-    if self._active == value then return end
-    if not Object:isClassOf(value) and value ~= nil then
-        error(("Active child must be an object (got: %s (%s))"):format(tostring(value), type(value)), 3)
+function cancelHover(self, ...)
+    validateObject(self, "caller")
+    local self_p = priv[self]
+    if not self_p.isHovered then return end
+    for sib in forwards(self) do
+        priv[sib].behindHover = false
+        if floof.safeInvoke(checkHover, sib, ...) then return end
     end
-    if value ~= nil and not value:isChildOf(self) then
-        error(("Active child must be a child of the object"), 3)
+    local parent_p = priv[self_p.parent] or Object_p
+    parent_p.hoverTarget = nil
+    floof.safeInvoke(stopHover, self, parent_p.pointerX, parent_p.pointerY, ...)
+end
+Object.cancelHover = cancelHover
+
+-- presses
+
+function getPressPosition(self, press)
+    validateObject(self, "caller", true)
+    if press == nil then
+        error("Invalid press ID: nil", 2)
+    elseif not priv[self].presses:find(press) then
+        error("Invalid press ID: the caller is not currently interacting with this press", 2)
     end
-    local inRoot = Object.root and (self == Object.root or self:isChildOf(Object.root))
-    if inRoot and self._active then
-        self._active:deactivated()
-        self:childdeactivated(self._active)
-    end
-    self._active = value
-    if inRoot and value then
-        value:activated()
-        self:childactivated(value)
-    end
-end
-
-Object.__get_isActive = function(self)
-    if self == Object.root then return true end
-    local e = self._parent
-    while e do
-        if e.activeChild == self then
-            return true
-        end
-        if e == Object.root then break end
-        e = e._parent
-    end
-    return false
-end
-
-Object.__get_hoveredChild = function(self)
-    if not self.isHovered then return end
-    if love and love.mouse then
-        local x, y = love.mouse.getPosition()
-        for i, e in ipairs(self._children) do
-            if e.isEnabled and e:check(x, y) then
-                return e
-            end
-        end
-    end
-end
-
-Object.__get_isHovered = function(self)
-    if self == Object.root then
-        return love and love.mouse and self:check(love.mouse.getPosition())
-    end
-    return self._parent and self._parent.isHovered and self._parent.hoveredChild == self or false
-end
-
-Object.__get_pressedObject = function(self)
-    return setmetatable({}, {
-        __index = self._pressedObject,
-        __newindex = function(t, k, v)
-            if not getPressPosition(k) then
-                error(("Invalid press ID: %s (%s)"):format(tostring(k), type(k)), 3)
-            end
-            if v ~= nil and not Object.is(v) then
-                error(("Invalid object (got: %s (%s))"):format(tostring(v), type(v)), 3)
-            end
-            if v ~= nil and v._parent ~= self then
-                error(("Target must be a child of this object"), 2)
-            end
-            self:setPressTarget(k, v)
-        end
-    })
-end
-
-Object.__get_children = function(self)
-    return self._children:copy()
-end
-
-Object.__get_presses = function(self)
-    return self._presses:copy()
-end
-
-Object.__get_press = function(self)
-    return self._presses[-1]
-end
-
-Object.__get_isPressed = function(self)
-    return self._presses.length > 0
-end
-
--- Check function
-function Object:check(x, y)
-    if self._check then
-        return self._check(self, x, y)
-    elseif self.class and self.class.check ~= Object.check then
-        return self.class.check(self, x, y)
+    if touchPresses[press] then
+        return touchPresses[press]:unpack()
     else
-        return Object.checks.default(self, x, y)
+        return getPointerPos(self)
     end
 end
+Object.getPressPosition = getPressPosition
 
-Object.__set_check = function(self, value)
-    if type(value) == "boolean" then
-        value = function() return value end
-    end
-    if type(value) ~= "function" then
-        error(("Check function must be a function (got: %s (%s))"):format(tostring(value), type(value)), 3)
-    end
-    self._check = value
-end
-
-Object.__get_check = function(self)
-    return Object.check
-end
-
--- Pre-defined checking functions
-Object.checks = {
-    -- rectangle with top-left origin (common for LÖVE)
-    cornerRect = function(self, x, y)
-        if type(self.x) ~= "number" or type(self.y) ~= "number" or type(self.w) ~= "number" or type(self.h) ~= "number" then
-            return false
-        end
-        local l, t, r, b = math.min(self.x, self.x + self.w), math.min(self.y, self.y + self.h), math.max(self.x, self.x + self.w), math.max(self.y, self.y + self.h)
-        return x >= l and x <= r and y >= t and y <= b
-    end,
-    -- rectangle with center origin (common for normal people)
-    centerRect = function(self, x, y)
-        if type(self.x) ~= "number" or type(self.y) ~= "number" or type(self.w) ~= "number" or type(self.h) ~= "number" then
-            return false
-        end
-        return x >= self.x - self.w/2 and x <= self.x + self.w/2 and y >= self.y - self.h/2 and y <= self.y + self.h/2
-    end,
-    -- circle with center origin
-    circle = function(self, x, y)
-        if type(self.x) ~= "number" or type(self.y) ~= "number" or type(self.r) ~= "number" then
-            return false
-        end
-        return (x - self.x)^2 + (y - self.y)^2 <= self.r^2
-    end,
-    -- ellipse with center origin
-    ellipse = function(self, x, y)
-        if type(self.x) ~= "number" or type(self.y) ~= "number" or type(self.w) ~= "number" or type(self.h) ~= "number" then
-            return false
-        end
-        return (x - self.x)^2 / (self.w/2)^2 + (y - self.y)^2 / (self.h)/2^2 <= 1
-    end,
-    -- union of all child checks
-    children = function(self, x, y)
-        for i, child in ipairs(self._children) do
-            if child:check(x, y) then
-                return true
+function startPress(self, press, x, y, ...)
+    local pointer = touchPresses[press] == nil
+    local self_p = priv[self]
+    if self == Object then self_p.presses:append(press) end
+    repeat
+        local nxt = nil
+        for ch in frontToBack(self) do
+            local ch_p = priv[ch]
+            if love and self == Object and ch_p.z < 0 then
+                if pointer and
+                    floof.safeInvoke(love.mousepressed, x, y, press, false, ...) or
+                not pointer and
+                    floof.safeInvoke(love.touchpressed, press, x, y, 0, 0, ...)
+                then
+                    nxt = love
+                    break
+                end
+            end
+            if ch_p.isActive and handleCallback(ch, "check", x, y) then
+                local v = handleCallback(ch, "pressed", x, y, press, not pointer, ...)
+                if v ~= false then
+                    self_p.pressTargets[press], nxt = ch, ch
+                    ch_p.presses:append(press)
+                    ch_p.isPressed = true
+                    invokeHandlers(ch, "pressed", x, y, press, not pointer, ...)
+                    if v == true then return end
+                    break
+                end
             end
         end
-        return false
-    end
-}
-Object.checks.default = Object.checks.cornerRect
+        if love and self == Object and not nxt then
+            if pointer then
+                floof.safeInvoke(love.mousepressed, x, y, press, false, ...)
+            else
+                floof.safeInvoke(love.touchpressed, press, x, y, 0, 0, ...)
+            end
+        elseif nxt == love then return end
+        self, self_p = nxt, priv[nxt]
+    until not self or pointer and self_p.ownPointer
+end
 
--- LÖVE callback setup function
-function Object.registerCallbacks(root)
-    if not love then return end
-    if root and not Object:isClassOf(root) then
-        error(("Invalid root object: %s (%s)"):format(tostring(root), type(root)), 3)
-    end
-    
-    local emptyf = function(...) return end
-    
-    local old = {}
-    for _, f in ipairs(Object.loveCallbackNames) do
-        old[f] = love[f] or emptyf
-    end
-    
-    for _, f in ipairs(Object.blockingCallbackNames) do
-        love[f] = function(...)
-            return (root or Object.root) and (root or Object.root)[f]((root or Object.root), ...) or old[f](...)
+function movePress(self, press, x, y, dx, dy, ...)
+    local pointer = touchPresses[press] == nil
+    if not priv[self].pressTargets[press] then 
+        if love and self == Object and not pointer then
+            return floof.safeReturn(love.touchmoved, press, x, y, dx, dy, ...)
+        else
+            return
         end
     end
-    
-    for _, f in ipairs{"resize", "update", "draw", "quit"} do
-        love[f] = function(...)
-            old[f](...)
-            if (root or Object.root) then
-                (root or Object.root)[f]((root or Object.root), ...)
+    local parent_p = priv[self]
+    self = parent_p.pressTargets[press]
+    local self_p = priv[self]
+    repeat
+        invokeHandlers(self, "dragged", x, y, dx, dy, press, not pointer, ...)
+        if handleCallback(self, "dragged", x, y, dx, dy, press, not pointer, ...) ~= true
+           and not handleCallback(self, "check", x, y)
+        then
+            parent_p.pressTargets[press] = nil
+            floof.safeInvoke(stopPress, self, press, x, y, false, ...)
+        end
+        parent_p = self_p
+        self = parent_p.pressTargets[press]
+        self_p = priv[self]
+    until not self or pointer and self_p.ownPointer
+end
+
+function stopPress(self, press, x, y, proper, ...)
+    local pointer = touchPresses[press] == nil
+    local self_p = priv[self]
+    repeat
+        self_p.presses:remove(press)
+        if self ~= Object then
+            if self_p.presses.length == 0 then self_p.isPressed = false end
+            invokeHandlers(self, proper and "released" or "cancelled", x, y, press, not pointer, ...)
+            if handleCallback(self, proper and "released" or "cancelled", x, y, press, not pointer, ...) then
+                proper = false
+            end
+        elseif love and proper and not self_p.pressTargets[press] then
+            if pointer then
+                floof.safeInvoke(love.mousereleased, x, y, press, false, ...)
+            else
+                floof.safeInvoke(love.touchreleased, press, x, y, 0, 0, ...)
+            end
+        end
+        self = self_p.pressTargets[press]
+        self_p.pressTargets[press] = nil
+        self_p = priv[self]
+    until not self or pointer and self_p.ownPointer
+end
+
+function getPressTarget(self, press)
+    validateObject(self, "caller", true)
+    if press == nil then
+        error("Invalid press ID: nil", 2)
+    elseif not priv[self].presses:find(press) then
+        error("Invalid press ID: the caller is not currently interacting with this press", 2)
+    end
+    return priv[self].pressTargets[press]
+end
+
+function setPressTarget(self, press, target, ...)
+    if proxyOwnership[self] then self = proxyOwnership[self] end
+    validateObject(self, "caller", true)
+    if press == nil then
+        error("Invalid press ID: nil", 2)
+    elseif not priv[self].presses:find(press) then
+        error("Invalid press ID: the caller is not currently interacting with this press", 2)
+    end
+    if target ~= nil then
+        validateObject(target, "target")
+        if priv[target].parent ~= (self ~= Object and self or nil) then
+            error("Invalid target: must be a child of the caller", 2)
+        elseif not priv[target].isActive then
+            error("Invalid target: object is inactive", 2)
+        end
+    end
+    local self_p = priv[self]
+    local old = self_p.pressTargets[press]
+    local pointer = touchPresses[press] == nil
+    local x, y = getPressPosition(self, press)
+    if old == target then return true end
+    if target then
+        local v = handleCallback(target, "pressed", x, y, press, not pointer, ...)
+        if v ~= false then
+            self_p.pressTargets[press] = target
+            if old then floof.safeInvoke(stopPress, old, press, x, y, false, ...) end
+            priv[target].presses:append(press)
+            priv[target].isPressed = true
+            invokeHandlers(target, "pressed", x, y, press, not pointer, ...)
+            if v ~= true then floof.safeInvoke(startPress, target, press, x, y, ...) end
+        end
+    elseif not target then
+        self_p.pressTargets[press] = nil
+        if old then floof.safeInvoke(stopPress, old, press, x, y, false, ...) end
+        if love and self == Object then
+            if pointer then
+                floof.safeInvoke(love.mousepressed, x, y, press, false, ...)
+            else
+                floof.safeInvoke(love.touchpressed, press, x, y, 0, 0, ...)
             end
         end
     end
-    
-    love.mousepressed = function(...)
-        local x, y, b, t = ...
-        if b and not t and (root or Object.root) then
-            (root or Object.root):keypressed(("mouse%d"):format(b))
-        end
-        if b and not t and (root or Object.root) and (root or Object.root):check(x, y) and (root or Object.root):pressed(x, y, b) ~= false then
-            return
-        end
-        old.mousepressed(...)
+end
+
+Object.getPressTarget, Object.setPressTarget = getPressTarget, setPressTarget
+
+function movePointer(self, x, y, dx, dy, ...)
+    if love and self == Object and not Object_p.ownPointer then
+        floof.safeInvoke(love.mousemoved, x, y, dx, dy, false, ...)
     end
-    
-    love.mousemoved = function(...)
-        local x, y, dx, dy, t = ...
-        if love and love.mouse and love.mouse.getRelativeMode() and (root or Object.root) then
-            (root or Object.root):mousedelta(dx, dy)
-            return
+    local self_p = priv[self]
+    for press, target in pairs(self_p.pressTargets) do
+        if not touchPresses[press] then
+            floof.safeInvoke(movePress, self, press, x, y, dx, dy, ...)
         end
-        if not t and (root or Object.root) then
-            local r = false
-            for i, b in ipairs((root or Object.root).presses) do
-                if type(b) == "number" then
-                    if (root or Object.root):moved(x, y, dx, dy, b) then
-                        r = true
+    end
+    local px, py = self_p.pointerX, self_p.pointerY
+    local curr, curr_p = self, self_p
+    repeat
+        curr_p.pointerX, curr_p.pointerY = x, y
+        local hov, stop = curr_p.hoverTarget, false
+        for ch in frontToBack(curr) do
+            local ch_p = priv[ch]
+            local wasBehind = ch_p.behindHover
+            ch_p.behindHover = false
+            if ch_p.isActive then
+                if ch_p.isHovered then
+                    invokeHandlers(ch, "hovermoved", x, y, dx, dy, ...)
+                    if handleCallback(ch, "hovermoved", x, y, dx, dy, ...) == true or
+                       handleCallback(ch, "check", x, y)
+                    then break else stop = true end
+                elseif (
+                    wasBehind or
+                    not handleCallback(ch, "check", px, py)
+                ) and floof.safeInvoke(checkHover, ch, ...)
+                then stop = false break end
+            end
+        end
+        if stop then
+            curr_p.hoverTarget = nil
+            floof.safeInvoke(stopHover, hov, x, y, ...)
+            hov = nil
+            break
+        end
+        curr, curr_p = hov, priv[hov]
+    until not curr or curr_p.ownPointer or curr_p.hoverTarget == false
+end
+
+function setters:pointerX(x)
+    if type(x) ~= "number" then
+        error(("Invalid value: number or nil expected, got %s"):format(floof.typeOf(x)), 2)
+    end
+    local self_p = priv[self]
+    if self ~= Object then
+        if not self_p.ownPointer then self_p.ownPointer = true end
+    else
+        if not self_p.ownPointer then setRelativeMode(true) end
+    end
+    floof.safeInvoke(movePointer, self, x, self_p.pointerY, x - self_p.pointerX, 0)
+end
+function setters:pointerY(y)
+    if type(y) ~= "number" then
+        error(("Invalid value: number or nil expected, got %s"):format(floof.typeOf(y)), 2)
+    end
+    local self_p = priv[self]
+    if self ~= Object then
+        if not self_p.ownPointer then self_p.ownPointer = true end
+    else
+        if not self_p.ownPointer then setRelativeMode(true) end
+    end
+    floof.safeInvoke(movePointer, self, self_p.pointerX, y, 0, y - self_p.pointerY)
+end
+
+function Object:movePointer(x, y, ...)
+    validateObject(self, "caller", true)
+    local self_p = priv[self]
+    if x ~= nil or y ~= nil then
+        if type(x) ~= "number" then
+            error(("Invalid x value: number or nil expected, got %s"):format(floof.typeOf(x)), 2)
+        end
+        if type(y) ~= "number" then
+            error(("Invalid y value: number or nil expected, got %s"):format(floof.typeOf(y)), 2)
+        end
+    end
+    if not x then
+        if self ~= Object then
+            if self_p.ownPointer then self_p.ownPointer = false end
+            local parent_p = priv[self_p.parent] or Object_p
+            x, y = parent_p.pointerX, parent_p.pointerY
+        else
+            if self_p.ownPointer then setRelativeMode(false) end
+            x, y = self_p.pointerX, self_p.pointerY
+        end
+    else
+        if self ~= Object then
+            if not self_p.ownPointer then self_p.ownPointer = true end
+        else
+            if not self_p.ownPointer then setRelativeMode(true) end
+        end
+    end
+    floof.safeInvoke(movePointer,
+        self,
+        x, y,
+        x - self_p.pointerX, y - self_p.pointerY,
+        ...
+    )
+end
+
+function pressPointer(self, press, ...)
+    validateObject(self, "caller", true)
+    local self_p = priv[self]
+    if press == nil then
+        error("Invalid press ID: nil", 2)
+    elseif touchPresses[press] then
+        error(("Invalid press ID (%s): this ID is currently associated with a touch-press"):format(tostring(press)), 2)
+    elseif not self_p.ownPointer then
+        error("Forbidden: only objects with a self-owned can manually register presses", 2)
+    elseif self_p.pressTargets[press] then
+        error(("Invalid press ID (%s): a press with this ID is already active"):format(tostring(press)), 2)
+    end
+    local x, y = getPointerPos(self)
+    floof.safeInvoke(startPress, self, press, x, y, ...)
+end
+
+function releasePointer(self, press, ...)
+    validateObject(self, "caller", true)
+    local self_p = priv[self]
+    if press == nil then
+        error("Invalid press ID: nil", 2)
+    elseif touchPresses[press] then
+        error("Invalid press ID: this ID is currently associated with a touch-press", 2)
+    elseif not self_p.ownPointer then
+        error("Forbidden: only objects with a self-owned can manually register presses", 2)
+    end
+    local t = self_p.pressTargets[press]
+    self_p.pressTargets[press] = nil
+    if t then floof.safeInvoke(stopPress, t, press, x, y, true, ...) end
+    return t
+end
+
+Object.pressPointer, Object.releasePointer = pressPointer, releasePointer
+
+function setters:ownPointer(value)
+    if type(value) ~= "boolean" then
+        error(("Invalid value: boolean expected, got %s"):format(floof.typeOf(value)), 2)
+    end
+    local self_p = priv[self]
+    if self_p.ownPointer == value then return end
+    self_p.ownPointer = value
+    if self == Object then
+        setRelativeMode(value)
+        if not value then setMousePosition(self_p.pointerX, self_p.pointerY) end
+    end
+    for press, obj in pairs(self_p.pressTargets) do
+        if not touchPresses[press] then
+            self_p.pressTargets[press] = nil
+            floof.safeInvoke(stopPress, obj, press, self_p.pointerX, self_p.pointerY, false)
+        end
+    end
+end
+
+-- input
+
+function addListener(self)
+    validateObject(self, "caller")
+    local self_p = priv[self]
+    if self_p.isListener then return end
+    self_p.isListener = true
+    if not Object.firstListener then
+        Object_p.firstListener, Object_p.lastListener = self, self
+        return
+    end
+    for ls in backtrackListeners() do
+        local ls_p = priv[l]
+        if ls_p.listenerPriority >= self_p.listenerPriority then
+            if ls_p.nextListener then
+                priv[ls_p.nextListener].previousListener = self
+            else
+                Object_p.lastListener = self
+            end
+            self_p.previousListener, self_p.nextListener = ls, ls_p.nextListener
+            ls_p.nextListener = self
+        elseif not ls_p.previousListener then
+            Object_p.firstListener = self
+            self_p.previousListener, self_p.nextListener = nil, ls
+            ls_p.previousListener = self
+        end
+    end
+end
+
+function removeListener(self)
+    validateObject(self, "caller")
+    local self_p = priv[self]
+    if not self_p.isListener then return end
+    self_p.isListener = false
+    if self_p.previousListener then
+        priv[self_p.previousListener].nextListener = self_p.nextListener
+    else
+        Object_p.firstListener = self_p.nextListener
+    end
+    if self_p.nextListener then
+        priv[self_p.nextListener].previousListener = self_p.previousListener
+    else
+        Object_p.lastListener = self_p.previousListener
+    end
+    self_p.previousListener, self_p.nextListener = nil, nil
+end
+
+Object.addListener, Object.removeListener = addListener, removeListener
+
+function setters:isListener(value)
+    validateObject(self, "caller")
+    if type(value) ~= "boolean" then
+        error(("Invalid value: boolean expected, got %s"):format(floof.typeOf(self)), 2)
+    end
+    if value then
+        floof.safeInvoke(addListener, self)
+    else
+        floof.safeInvoke(removeListener, self)
+    end
+end
+
+function setListenerPriority(self, value)
+    validateObject(self, "caller")
+    if type(value) ~= "number" then
+        error(("Invalid value: number expected, got %s"):format(floof.typeOf(self)), 2)
+    end
+    local self_p = priv[self]
+    self_p.listenerPriority = value
+    if self_p.isListener then
+        if self_p.previousListener and value > priv[self_p.previousListener].listenerPriority then
+            for nxt in backtrackListener(self) do
+                local nxt_p = priv[nxt]
+                local prv = nxt_p.previousListener
+                local prv_p = priv[prv]
+                if not prv or prv_p.listenerPriority >= value then
+                    priv[self_p.previousListener].nextListener = self_p.nextListener
+                    if self_p.nextListener then
+                        priv[self_p.nextListener].previousListener = self_p.previousListener
+                    else
+                        Object_p.lastListener = self_p.previousListener
                     end
+                    self_p.previousListener, self_p.nextListener, nxt_p.previousListener = prv, nxt, self
+                    if prv then
+                        prv_p.nextListener = self
+                    else
+                        Object_p.firstListener = self
+                    end
+                    break
                 end
             end
-            if r then
-                return
-            end
-        end
-        old.mousemoved(...)
-    end
-    
-    love.mousereleased = function(...)
-        local x, y, b, t = ...
-        if b and not t and (root or Object.root) then
-            (root or Object.root):keyreleased(("mouse%d"):format(b))
-        end
-        if b and not t and (root or Object.root) then
-            for i, press in ipairs((root or Object.root).presses) do
-                if press == b then
-                    (root or Object.root):released(x, y, b)
-                    return
-                end
-            end
-        end
-        old.mousereleased(...)
-    end
-    
-    love.wheelmoved = function(...)
-        local x, y = ...
-        return (root or Object.root) and (root or Object.root).isHovered and (root or Object.root):scrolled(y) or old.wheelmoved(...)
-    end
-    
-    love.touchpressed = function(...)
-        local id, x, y = ...
-        if (root or Object.root) and (root or Object.root):check(x, y) and (root or Object.root):pressed(x, y, id) ~= false then
-            return
-        end
-        old.touchpressed(...)
-    end
-    
-    love.touchmoved = function(...)
-        local id, x, y, dx, dy = ...
-        if (root or Object.root) then
-            for i, press in ipairs((root or Object.root).presses) do
-                if press == id then
-                    if (root or Object.root):moved(x, y, dx, dy, id) then
-                        return
+        elseif self_p.nextListener and value < priv[self_p.nextListener].listenerPriority then
+            for prv in iterateListener(self) do
+                local prv_p = priv[prv]
+                local nxt = prv_p.nextListener
+                local nxt_p = priv[nxt]
+                if not nxt or nxt_p.listenerPriority <= value then
+                    priv[self_p.nextListener].previousListener = self_p.previousListener
+                    if self_p.previousListener then
+                        priv[self_p.previousListener].nextListener = self_p.nextListener
+                    else
+                        Object_p.firstListener = self_p.nextListener
+                    end
+                    self_p.previousListener, self_p.nextListener, prv_p.nextListener = prv, nxt, self
+                    if nxt then
+                        nxt_p.previousListener = self
+                    else
+                        Object_p.lastListener = self
                     end
                     break
                 end
             end
         end
-        old.touchmoved(...)
-    end
-    
-    love.touchreleased = function(...)
-        local id, x, y = ...
-        if (root or Object.root) then
-            for i, press in ipairs((root or Object.root).presses) do
-                if press == id then
-                    (root or Object.root):released(x, y, id)
-                    return
-                end
-            end
-        end
-        old.touchreleased(...)
     end
 end
+Object.setListenerPriority, setters.listenerPriority = setListenerPriority, setListenerPriority
 
-Object.serializeFields = {
-    "z", "isPressed", "enabledSelf", "children"
-}
-
-Object.serializeIndent = 4
-
-function Object:serialize(indent)
-    local str = string.rep(" ", Object.serializeIndent * (indent or 0)) .. tostring(self) .. ":"
-    local ind = string.rep(" ", Object.serializeIndent * ((indent or 0) + 1))
-    if rawget(self, "serializeFields") then
-        for i, f in ipairs(self.serializeFields) do
-            local value = self[f]
-            if value ~= nil then
-                str = str .. ("\n%s%s: %s"):format(ind, f, tostring(value))
-            end
+function listenBefore(self, nextListener)
+    validateObject(self, "caller")
+    if nextListener ~= nil then
+        validateObject(nextListener, "value")
+        if not priv[nextListener].isListener then
+            error("Invalid value: not a registered listener", 2)
         end
     end
-    local c = self.class
-    while c do
-        if Array:isClassOf(c.serializeFields) then
-            for i, f in c.serializeFields:iterate() do
-                if type(f) == "string" then
-                    local value = self[f]
-                    if value ~= nil then
-                        str = str .. ("\n%s%s: %s"):format(ind, f, tostring(value))
-                    end
-                end
-            end
+    local self_p = priv[self]
+    if self_p.nextListener == nextListener then return end
+    if self_p.isListener then
+        if self_p.previousListener then
+            priv[self_p.previousListener].nextListener = self_p.nextListener
+        else
+            Object_p.firstListener = self_p.nextListener
         end
-        c = c.class or c.super
+        if self_p.nextListener then
+            priv[self_p.nextListener].previousListener = self_p.previousListener
+        else
+            Object_p.lastListener = self_p.previousListener
+        end
+    else
+        self_p.isListener = true
     end
-    return str
+    if nextListener then
+        local nextListener_p = priv[nextListener]
+        if nextListener_p.previousListener then
+            priv[nextListener_p.previousListener].nextListener = self
+        else
+            Object_p.firstListener = self
+        end
+        self_p.previousListener, self_p.nextListener, nextListener_p.previousListener = nextListener_p.previousListener, nextListener, self
+    else
+        self_p.previousListener, self_p.nextListener, Object_p.lastListener = Object_p.lastListener, nil, self
+    end
+end
+Object.listenBefore, setters.nextListener = listenBefore, listenBefore
+
+function listenAfter(self, previousListener)
+    validateObject(self, "caller")
+    if previousListener ~= nil then
+        validateObject(previousListener, "value")
+        if not priv[previousListener].isListener then
+            error("Invalid value: not a registered listener", 2)
+        end
+    end
+    local self_p = priv[self]
+    if self_p.previousListener == previousListener then return end
+    if self_p.isListener then
+        if self_p.previousListener then
+            priv[self_p.previousListener].nextListener = self_p.nextListener
+        else
+            Object_p.firstListener = self_p.nextListener
+        end
+        if self_p.nextListener then
+            priv[self_p.nextListener].previousListener = self_p.previousListener
+        else
+            Object_p.lastListener = self_p.previousListener
+        end
+    else
+        self_p.isListener = true
+    end
+    if previousListener then
+        local previousListener_p = priv[previousListener]
+        if previousListener_p.nextListener then
+            priv[previousListener_p.nextListener].previousListener = self
+        else
+            Object_p.lastListener = self
+        end
+        self_p.previousListener, self_p.nextListener, previousListener_p.nextListener = previousListener, previousListener_p.nextListener, self
+    else
+        self_p.previousListener, self_p.nextListener, Object_p.firstListener = nil, Object_p.firstListener, self
+    end
+end
+Object.listenAfter, setters.previousListener = listenAfter, listenAfter
+
+function setters:firstListener(obj)
+    if self ~= Object then
+        error(("Forbidden: the %q field can only be modified on the Object class"):format("firstListener"), 2)
+    end
+    floof.safeInvoke(listenAfter, obj)
+end
+function setters:lastListener(obj)
+    if self ~= Object then
+        error(("Forbidden: the %q field can only be modified on the Object class"):format("lastListener"), 2)
+    end
+    floof.safeInvoke(listenBefore, obj)
 end
 
-Object.setRoot(Object({check = true}))
+iterateListener = privKeyIterator("nextListener")
+function iterateListeners() return iterateListener(Object_p.firstListener, true) end
+Object.iterateListener, Object.iterateListeners = iterateListener, iterateListeners
+
+backtrackListener = privKeyIterator("previousListener")
+function backtrackListeners() return backtrackListener(Object_p.lastListener, true) end
+Object.backtrackListener, Object.backtrackListeners = backtrackListener, backtrackListeners
+
+function listeningStatus(self, value)
+    validateObject(self, "caller")
+    if type(value) ~= "boolean" then
+        error(("Invalid value: boolean expected, got %s"):format(floof.typeOf(self)), 2)
+    end
+    priv[self].isListening = value and true or false
+end
+Object.setListeningStatus, setters.isListening = listeningStatus, listeningStatus
+
+function listenerEvent(self, name, ...)
+    validateObject(self, "caller", true)
+    local handleLove = self == Object and love ~= nil
+    for l in iterateListener(self == Object and Object_p.firstListener or self, self == Object) do
+        local l_p = priv[l]
+        if handleLove and l_p.listenerPriority < 0 then
+            handleLove = false
+            floof.safeInvoke(love[name], ...)
+        end
+        if l_p.isActive and l_p.isListening then
+            invokeHandlers(l, name, ...)
+            handleCallback(l, name, ...)
+        end
+    end
+    if handleLove and name then 
+        invokeHandlers(name, ...)
+        floof.safeInvoke(love[name], ...)
+    end
+end
+Object.listenerEvent = listenerEvent
+
+-- messaging
+
+function Object:call(self, name, ...)
+    validateObject(self, "caller")
+    return floof.safeReturn(self[name], self, ...)
+end
+
+function send(self, name, ...)
+    validateObject(self, "caller", true)
+    for obj in frontToBack(self) do
+        if priv[obj].isActive then floof.safeInvoke(obj[name], obj, ...) end
+    end
+end
+function sendAll(self, name, ...)
+    validateObject(self, "caller", true)
+    for obj in frontToBack(self) do
+        floof.safeInvoke(obj[name], obj, ...)
+    end
+end
+Object.send, Object.sendAll = send, sendAll
+
+function broadcast(self, name, ...)
+    validateObject(self, "caller", true)
+    for obj in hierarchyBackwards(self) do
+        if priv[obj].isActive then floof.safeInvoke(obj[name], obj, ...) end
+    end
+end
+function broadcastAll(self, name, ...)
+    validateObject(self, "caller", true)
+    for obj in hierarchyBackwards(self) do
+        floof.safeInvoke(obj[name], obj, ...)
+    end
+end
+Object.broadcast, Object.broadcastAll = broadcast, broadcastAll
+
+-- graphics
+
+function render(self)
+    validateObject(self, "caller", true)
+    local drawn, curr = {}, self ~= Object and self or backmostActive(self)
+    while curr do
+        local curr_p = priv[curr]
+        if curr ~= self and curr_p.z >= 0 then
+            if curr_p.parent and not drawn[curr_p.parent] then
+                pushGraphics("all")
+                handleCallback(curr_p.parent, "draw")
+                popGraphics()
+                drawn[curr_p.parent] = true
+            elseif love and self == Object and not curr_p.parent and not drawn[love] then
+                pushGraphics("all")
+                floof.safeInvoke(love.draw)
+                popGraphics()
+                drawn[love] = true
+            end
+        end
+        while true do
+            pushGraphics("all")
+            handleCallback(curr, "predraw")
+            local backmost = backmostActive(curr)
+            if backmost then curr = backmost else break end
+        end
+        while curr do
+            if not drawn[curr] then
+                pushGraphics("all")
+                handleCallback(curr, "draw")
+                popGraphics()
+                drawn[curr] = true
+            end
+            handleCallback(curr, "postdraw")
+            popGraphics()
+            if curr == self then break end
+            local backward = backwardActive(curr)
+            if backward then curr = backward break end
+            curr = priv[curr].parent
+        end
+        if curr == self then break end
+    end
+    if love and self == Object and not drawn[love] then
+        pushGraphics("all")
+        floof.safeInvoke(love.draw)
+        popGraphics()
+    end
+end
+Object.render = render
 
 return Object
