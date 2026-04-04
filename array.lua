@@ -171,6 +171,19 @@ function Array:remove(v)
     for i, u in self:iterate() do
         if u == v then
             self:pop(i)
+            break
+        end
+    end
+    return self
+end
+
+function Array:removeAll(v)
+    if not length[self] then
+        error(("Invalid caller: mutable Array expected, got %s"):format(floof.typeOf(self)), 2)
+    end
+    for i, u in self:iterate() do
+        if u == v then
+            self:pop(i)
         end
     end
     return self

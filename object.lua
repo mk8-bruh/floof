@@ -1,8 +1,7 @@
 local WARN_QUIT_BLOCK = true
-local QUIT_BLOCK_MESSAGE = [["\x1b[1;33m!! Quitting was blocked by <%s>
-!! Please be careful with this functionality as it might force you or your user to use the task manager to exit the application.
-!! If you know what you are doing and wish to stop receiving these messages, you can disable the \x1b[32mWARN_QUIT_BLOCK\x1b[33m flag at the top of the Object module file.
-\x1b[0m]]
+local QUIT_BLOCK_MESSAGE = [[\x1b[1;33m!! Quitting was blocked by <%s>\x1b[22m
+!! Please be careful with this functionality as it might your program un-quittable.
+!! If you know what you are doing and wish to stop seeing these messages, you can disable the \x1b[1mWARN_QUIT_BLOCK\x1b[22m flag at the top of the Object module file.\x1b[0m]]
 local STORE_HANDLER_SOURCE = true
 
 -- FLOOF: Fast Lua Object-Oriented Framework
@@ -22,7 +21,7 @@ local registerHandler, removeHandler,
       invokeHandlers,
       handlerIterator, iterateHandlers
 
-local adopt, orphan,
+local add, remove,
       isChildOf,
       ancestors,
       delete
@@ -41,7 +40,8 @@ local setDepth,
     
 local getPointerPos,
       stopHover,
-      checkHover, cancelHover
+      checkHover, cancelHover,
+      shapeChanged
 
 local getPressPosition,
       startPress, movePress, stopPress,
@@ -101,7 +101,7 @@ local function initPrivInstance(self)
 end
 
 local function setRelativeMode() end
-local function getMousePosition() return Object_p.pointerX, Object_p.pointerY end
+local function setMousePosition() end
 local function pushGraphics() end
 local function popGraphics() end
 
@@ -255,7 +255,7 @@ function Object:__init(data)
             floof.safeInvoke(floof.set, self, k, v)
         end
     end
-    if not self_p.parent then floof.safeInvoke(adopt, self) end
+    if not self_p.parent then floof.safeInvoke(add, self) end
     self_p.isInitialized = true
     invokeHandlers(self, "initialized")
     handleCallback(self, "initialized")
@@ -328,6 +328,7 @@ local globalEvents = { -- [name, callOnInactive]
 }
 
 local touchPresses = {}
+function Object.isTouchPress(id) return touchPresses[id] ~= nil end
 
 local function quit(...)
     for hand in iterateHandlers("quit") do
@@ -499,7 +500,7 @@ end
 
 -- hierarchy
 
-function adopt(self, parent)
+function add(self, parent)
     validateObject(self, "caller")
     local self_p = priv[self]
     if self_p.isInitialized and self_p.parent == parent then return end
@@ -507,7 +508,7 @@ function adopt(self, parent)
     if parent and isChildOf(parent, self) then
         error("Invalid value: cannot be a descendant of the Object", 2)
     end
-    if self_p.isInitialized then floof.safeInvoke(orphan, self) end
+    if self_p.isInitialized then floof.safeInvoke(remove, self) end
     local parent_p = priv[parent or Object]
     if parent and not parent_p.isActive and self_p.isActive then
         floof.safeInvoke(activeState, self, false)
@@ -554,9 +555,9 @@ function adopt(self, parent)
         end
     end
 end
-Object.setParent, setters.parent = adopt, adopt
+Object.setParent, setters.parent = add, add
 
-function orphan(self)
+function remove(self)
     local self_p = priv[self]
     local parent = self_p.parent or Object
     local parent_p = priv[parent]
@@ -564,11 +565,16 @@ function orphan(self)
         parent_p.pressTargets[press] = nil
         floof.safeInvoke(stopPress, self, press, getPressPosition(self, press))
     end
-    if parent and self_p.isInitialized then
-        invokeHandlers(self, "removedfrom", parent)
-        handleCallback(self, "removedfrom", parent)
-        invokeHandlers(parent, "removed", self)
-        handleCallback(parent, "removed", self)
+    if self_p.isInitialized then
+        if parent then
+            invokeHandlers(self, "removedfrom", parent)
+            handleCallback(self, "removedfrom", parent)
+            invokeHandlers(parent, "removed", self)
+            handleCallback(parent, "removed", self)
+        else
+            invokeHandlers(self, "adopted")
+            handleCallback(self, "adopted")
+        end
     end
     floof.safeInvoke(cancelHover, self)
     if self_p.backward then
@@ -588,7 +594,7 @@ end
 function delete(self)
     validateObject(self, "caller")
     local self_p = priv[self]
-    floof.safeInvoke(orphan, self)
+    floof.safeInvoke(remove, self)
     if self_p.isInitialized then
         invokeHandlers(self, "deleted")
         handleCallback(self, "deleted")
@@ -655,7 +661,7 @@ Object.setActiveState, setters.activeSelf = setActiveState, setActiveState
 function setDepth(self, z)
     validateObject(self, "caller")
     if type(z) ~= "number" then
-        error("Value must be a number", 2)
+        error(("Invalid value: number expected, got %s"):format(floof.typeOf(z)), 2)
     end
     local self_p = priv[self]
     self_p.z = z
@@ -719,14 +725,13 @@ function moveInFront(self, forward)
     validateObject(self, "caller")
     if forward ~= nil then validateObject(forward, "value") end
     if self == forward then error("Invalid value: equal to caller", 2) end
-    local self_p, backward_p = priv[self], priv[forward]
-    if forward and backward_p.parent ~= self_p.parent then
-        error("Invalid value: object must be a sibling of the caller", 2)
+    local self_p, forward_p = priv[self], priv[forward]
+    if forward and forward_p.parent ~= self_p.parent then
+        error("Invalid value: must be a sibling of the caller", 2)
     end
     if self_p.forward == forward then return end
     local parent_p = priv[self_p.parent] or Object_p
     local p_backward = self_p.forward
-    local x, y = parent_p.pointerX, parent_p.pointerY
     if self_p.backward then
         priv[self_p.backward].forward = self_p.forward
     else
@@ -738,25 +743,25 @@ function moveInFront(self, forward)
         parent_p.backmost = self_p.backward
     end
     if forward then
-        self_p.z = backward_p.z
-        if backward_p.backward then
-            priv[backward_p.backward].forward = self
+        self_p.z = forward_p.z
+        if forward_p.backward then
+            priv[forward_p.backward].forward = self
         else
             parent_p.frontmost = self
         end
-        backward_p.backward = self
+        forward_p.backward = self
     else
         self_p.z = priv[parent_p.backmost].z
         priv[parent_p.backmost].forward, parent_p.backmost = self, self
     end
-    if self_p.isHovered and backward_p.behindHover then
+    if self_p.isHovered and forward_p.behindHover then
         for sib in forwards(p_backward, true) do
             if sib == self then break end
             local sib_p = priv[sib]
             sib_p.behindHover = false
             if floof.safeInvoke(checkHover, sib) then break end
         end
-    elseif self_p.behindHover and not backward_p.behindHover then
+    elseif self_p.behindHover and not forward_p.behindHover then
         self_p.behindHover = false
         floof.safeInvoke(checkHover, self)
     end
@@ -771,14 +776,13 @@ function moveBehind(self, backward)
     validateObject(self, "caller")
     if backward ~= nil then validateObject(backward, "value") end
     if self == backward then error("Invalid value: equal to caller", 2) end
-    local self_p, forward_p = priv[self], priv[backward]
-    if backward and forward_p.parent ~= self_p.parent then
-        error("Invalid value: object must be a sibling of the caller", 2)
+    local self_p, backward_p = priv[self], priv[backward]
+    if backward and backward_p.parent ~= self_p.parent then
+        error("Invalid value: must be a sibling of the caller", 2)
     end
     if self_p.backward == backward then return end
     local parent_p = priv[self_p.parent] or Object_p
     local p_backward = self_p.forward
-    local x, y = parent_p.pointerX, parent_p.pointerY
     if self_p.backward then
         priv[self_p.backward].forward = self_p.forward
     else
@@ -790,25 +794,25 @@ function moveBehind(self, backward)
         parent_p.backmost = self_p.backward
     end
     if backward then
-        self_p.z = forward_p.z
-        if forward_p.forward then
-            priv[forward_p.forward].backward = self
+        self_p.z = backward_p.z
+        if backward_p.forward then
+            priv[backward_p.forward].backward = self
         else
             parent_p.backmost = self
         end
-        forward_p.forward = self
+        backward_p.forward = self
     else
         self_p.z = priv[parent_p.frontmost].z
         priv[parent_p.frontmost].backward, parent_p.frontmost = self, self
     end
-    if self_p.isHovered and forward_p.behindHover then
+    if self_p.isHovered and backward_p.behindHover then
         for sib in forwards(p_backward, true) do
             if sib == self then break end
             local sib_p = priv[sib]
             sib_p.behindHover = false
             if floof.safeInvoke(checkHover, sib) then break end
         end
-    elseif forward_p.isHovered or forward_p.behindHover then
+    elseif backward_p.isHovered or backward_p.behindHover then
         self_p.behindHover = true
     end
     if self_p.isInitialized then
@@ -823,7 +827,7 @@ function setFrontmost(self, frontmost)
     validateObject(frontmost, "value")
     local self_p, frontmost_p = priv[self], priv[frontmost]
     if frontmost.parent ~= self then
-        error("Invalid value: object must be a sibling of the caller", 2)
+        error("Invalid value: must be a child of the caller", 2)
     end
     if self_p.frontmost == frontmost then return end
     floof.safeInvoke(moveInFront, frontmost, self_p.frontmost)
@@ -834,8 +838,8 @@ function setBackmost(self, backmost)
     validateObject(self, "caller", true)
     validateObject(backmost, "value")
     local self_p, backmost_p = priv[self], priv[backmost]
-    if bacmost_p.parent ~= self then
-        error("Invalid value: object must be a sibling of the caller", 2)
+    if backmost_p.parent ~= self then
+        error("Invalid value: must be a child of the caller", 2)
     end
     if self_p.backmost == backmost then return end
     floof.safeInvoke(moveBehind, backmost, self_p.backmost)
@@ -946,7 +950,6 @@ function stopHover(self, ...)
 end
 
 function checkHover(self, ...)
-    validateObject(self, "caller")
     local self_p = priv[self]
     local parent = self_p.parent
     local parent_p = priv[parent] or Object_p
@@ -997,7 +1000,6 @@ function checkHover(self, ...)
     until not curr or curr_p.ownPointer or curr_p.hoverTarget == false
     return true
 end
-Object.checkHover = checkHover
 
 function cancelHover(self, ...)
     validateObject(self, "caller")
@@ -1013,6 +1015,28 @@ function cancelHover(self, ...)
 end
 Object.cancelHover = cancelHover
 
+function shapeChanged(self, ...)
+    validateObject(self, "caller")
+    local self_p = priv[self]
+    local parent = self_p.parent
+    local parent_p = priv[parent] or Object_p
+    local x, y = parent_p.pointerX, parent_p.pointerY
+    if self_p.isHovered then
+        if handleCallback(self, "hovermoved", x, y, 0, 0, ...) ~= true and not handleCallback(self, "check", x, y) then
+            floof.safeInvoke(cancelHover, self, ...)
+        end
+    else
+        floof.safeInvoke(checkHover, self, ...)
+    end
+    for i, press in self_p.presses:iterate() do
+        local x, y = getPressPosition(self, press)
+        if handleCallback(self, "dragged", press, x, y, 0, 0, ...) ~= true and not handleCallback(self, "check", x, y) then
+            floof.safeInvoke(stopPress, self, press, x, y, false, ...)
+        end
+    end
+end
+Object.shapeChanged = shapeChanged
+
 -- presses
 
 function getPressPosition(self, press)
@@ -1020,7 +1044,7 @@ function getPressPosition(self, press)
     if press == nil then
         error("Invalid press ID: nil", 2)
     elseif not priv[self].presses:find(press) then
-        error("Invalid press ID: the caller is not currently interacting with this press", 2)
+        error(("Invalid press ID (%s): the caller is not currently interacting with this press"):format(tostring(press)), 2)
     end
     if touchPresses[press] then
         return touchPresses[press]:unpack()
@@ -1126,7 +1150,7 @@ function getPressTarget(self, press)
     if press == nil then
         error("Invalid press ID: nil", 2)
     elseif not priv[self].presses:find(press) then
-        error("Invalid press ID: the caller is not currently interacting with this press", 2)
+        error(("Invalid press ID (%s): the caller is not currently interacting with this press"):format(tostring(press)), 2)
     end
     return priv[self].pressTargets[press]
 end
@@ -1137,7 +1161,7 @@ function setPressTarget(self, press, target, ...)
     if press == nil then
         error("Invalid press ID: nil", 2)
     elseif not priv[self].presses:find(press) then
-        error("Invalid press ID: the caller is not currently interacting with this press", 2)
+        error(("Invalid press ID (%s): the caller is not currently interacting with this press"):format(tostring(press)), 2)
     end
     if target ~= nil then
         validateObject(target, "target")
@@ -1344,7 +1368,7 @@ function addListener(self)
         return
     end
     for ls in backtrackListeners() do
-        local ls_p = priv[l]
+        local ls_p = priv[ls]
         if ls_p.listenerPriority >= self_p.listenerPriority then
             if ls_p.nextListener then
                 priv[ls_p.nextListener].previousListener = self
@@ -1557,15 +1581,15 @@ Object.setListeningStatus, setters.isListening = listeningStatus, listeningStatu
 function listenerEvent(self, name, ...)
     validateObject(self, "caller", true)
     local handleLove = self == Object and love ~= nil
-    for l in iterateListener(self == Object and Object_p.firstListener or self, self == Object) do
-        local l_p = priv[l]
-        if handleLove and l_p.listenerPriority < 0 then
+    for ls in iterateListener(self == Object and Object_p.firstListener or self, self == Object) do
+        local ls_p = priv[ls]
+        if handleLove and ls_p.listenerPriority < 0 then
             handleLove = false
             floof.safeInvoke(love[name], ...)
         end
-        if l_p.isActive and l_p.isListening then
-            invokeHandlers(l, name, ...)
-            handleCallback(l, name, ...)
+        if ls_p.isActive and ls_p.isListening then
+            invokeHandlers(ls, name, ...)
+            handleCallback(ls, name, ...)
         end
     end
     if handleLove and name then 
@@ -1577,7 +1601,7 @@ Object.listenerEvent = listenerEvent
 
 -- messaging
 
-function Object:call(self, name, ...)
+function Object:call(name, ...)
     validateObject(self, "caller")
     return floof.safeReturn(self[name], self, ...)
 end
