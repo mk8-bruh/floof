@@ -285,8 +285,10 @@ function dw(self, d)
         end
     end
     self_p.w = self_p.w + d
-    self_p.l = self_p.l - d/2
-    self_p.r = self_p.r + d/2
+    if self ~= Element then
+        self_p.l = self_p.l - d/2
+        self_p.r = self_p.r + d/2
+    end
     -- size
     if self_p.aspectRatio then
         operation(dh, self, d / self_p.aspectRatio)
@@ -320,7 +322,7 @@ function dw(self, d)
     end
     if self_p.layoutIndex and parent_p.layoutDirection == "row" then droom(self_p.parentElement or Element, -d) end
     if self_p.layoutDirection == "row" then droom(self, d) end
-    dirty[self] = true
+    if self ~= Element then dirty[self] = true end
 end
 
 function dh(self, d)
@@ -380,8 +382,10 @@ function dh(self, d)
         end
     end
     self_p.h = self_p.h + d
-    self_p.t = self_p.t - d/2
-    self_p.b = self_p.b + d/2
+    if self ~= Element then
+        self_p.t = self_p.t - d/2
+        self_p.b = self_p.b + d/2
+    end
     -- size
     if self_p.aspectRatio then
         operation(dw, self, d * self_p.aspectRatio)
@@ -415,7 +419,7 @@ function dh(self, d)
     end
     if self_p.layoutIndex and parent_p.layoutDirection == "column" then droom(self_p.parentElement or Element, -d) end
     if self_p.layoutDirection == "column" then droom(self, d) end
-    dirty[self] = true
+    if self ~= Element then dirty[self] = true end
 end
 
 function dmx(self, l, r)
@@ -845,6 +849,12 @@ Element:registerHandler("deleted", function(self)
     local self_p = priv[self]
     removed(self, self_p.parentElement)
     deleted[self] = true
+end)
+
+Object.registerHandler("resize", function(w, h)
+    operation(dw, Element, w - Element_p.w)
+    operation(dh, Element, h - Element_p.h)
+    flushOperations()
 end)
 
 -- properties
