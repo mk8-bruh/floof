@@ -3,7 +3,7 @@
 
 local PATH = (...):match("^(.+%.).-$") or ""
 local floof = require(PATH)
-local array, vec, Object = floof.array, floof.vector, floof.object
+local array, vec, Object = floof.array, floof.vector, floof.self
 
 local Element = Object:class("Element")
 
@@ -13,8 +13,7 @@ local dx, dy,
       dw, dh,
       dmx, dmy,
       dpx, dpy,
-      ds,
-      addToLayout, removeFromLayout
+      ds
 
 local isBefore,
       setSortOrder,
@@ -35,7 +34,7 @@ local Element_p = {
     lp = 0, tp = 0, rp = 0, bp = 0,
     leftPadding = nil, topPadding = nil, rightPadding = nil, bottomPadding = nil,
     layoutDirection = "column", justifyChildren = "top", alignChildren = "center",
-    space = 0, spacing = nil, spaceAround = false, expandSpace = false, extraSpace = 0,
+    space = 0, spacing = nil, spaceAround = false, expandSpace = false, extraRoom = 0, totalSpace = 0,
     firstChildElement = nil, lastChildElement = nil, layoutCount = 0,
     layoutContentSize = 0, scroll = 0, minScroll = 0, maxScroll = 0
 }
@@ -55,12 +54,12 @@ local function initPrivInstance(self)
         lm = 0, tm = 0, rm = 0, bm = 0,
         lp = 0, tp = 0, rp = 0, bp = 0,
         width = nil, height = nil, aspectRatio = nil,
-        alignX = "center", alignY = "center", anchorX = "center", anchorY = "center",
+        alignX = nil, alignY = nil, anchorX = "center", anchorY = "center",
         leftMargin  = nil, topMargin  = nil, rightMargin  = nil, bottomMargin  = nil,
         leftPadding = nil, topPadding = nil, rightPadding = nil, bottomPadding = nil,
         inLayout = true, layoutIndex = nil, ox = 0, oy = 0,
         layoutDirection = "column", justifyChildren = "top", alignChildren = "center",
-        space = 0, spacing = nil, spaceAround = false, expandSpace = false, extraSpace = 0,
+        space = 0, spacing = nil, spaceAround = false, expandSpace = false, extraRoom = 0,
         firstChildElement = nil, lastChildElement = nil, layoutCount = 0,
         layoutContentSize = 0, scroll = 0, minScroll = 0, maxScroll = 0
     }
@@ -110,7 +109,7 @@ local getters = {
     leftPadding = priv, topPadding = priv, rightPadding = priv, bottomPadding = priv,
     inLayout = priv, layoutIndex = priv, ox = priv, oy = priv,
     layoutDirection = priv, justifyChildren = priv, alignChildren = priv,
-    space = priv, spacing = priv, spaceAround = priv, expandSpace = priv, --extraSpace = priv,
+    space = priv, spacing = priv, spaceAround = priv, expandSpace = priv, --extraRoom = priv, totalSpace = priv,
     firstChildElement = priv, lastChildElement = priv, layoutCount = priv,
     layoutContentSize = priv, scroll = priv, minScroll = priv, maxScroll = priv
 }
@@ -150,13 +149,12 @@ function operation(f, ...)
     end
 end
 
-function flushOperations(l)
-    l = l and l + 1 or 3
+function flushOperations()
     local ops, els = 0, 0
     while operations.head do
         local op = operations.head
         local s, e = pcall(op.func, unpack(op))
-        if not s then error(e, l) end
+        if not s then error(e, 3) end
         if operations[op] then
             operations.head, operations[op] = operations[op]
         else
@@ -166,7 +164,7 @@ function flushOperations(l)
     end
     for el in pairs(dirty) do
         local s, e = pcall(Object.shapeChanged, el)
-        if not s then error(e, l) end
+        if not s then error(e, 3) end
         dirty[el] = nil
         els = els + 1
     end
@@ -197,18 +195,18 @@ function dy(self, d, offset)
     dirty[self] = true
 end
 
-local function dExtraSp(self, d)
+local function droom(self, d)
     local self_p = priv[self]
-    local ds = math.max(self_p.extraSpace - d, 0) - math.max(self_p.extraSpace, 0)
+    local dr = math.max(self_p.extraRoom - d, 0) - math.max(self_p.extraRoom, 0)
     local ns = math.max(self_p.layoutCount + (self_p.spaceAround and 1 or -1), 0)
-    self_p.extraSpace = self_p.extraSpace - d
+    self_p.extraRoom = self_p.extraRoom - d
     local scr = 0
     if self_p.justifyChildren == "left" or self_p.justifyChildren == "top" then
-        self_p.minScroll, self_p.maxScroll = math.min(self_p.extraSpace, 0), 0
+        self_p.minScroll, self_p.maxScroll = math.min(self_p.extraRoom, 0), 0
     elseif self_p.justifyChildren == "center" or self_p.justifyChildren == "middle" then
-        self_p.minScroll, self_p.maxScroll = math.min(self_p.extraSpace/2, 0), math.max(-self_p.extraSpace/2, 0)
+        self_p.minScroll, self_p.maxScroll = math.min(self_p.extraRoom/2, 0), math.max(-self_p.extraRoom/2, 0)
     elseif self_p.justifyChildren == "right" or self_p.justifyChildren == "bottom" then
-        self_p.minScroll, self_p.maxScroll = 0, math.max(-self_p.extraSpace, 0)
+        self_p.minScroll, self_p.maxScroll = 0, math.max(-self_p.extraRoom, 0)
     end
     if self_p.scroll < self_p.minScroll then
         scr = self_p.minScroll - self_p.scroll
@@ -217,23 +215,9 @@ local function dExtraSp(self, d)
         scr = self_p.maxScroll - self_p.scroll
         self_p.scroll = self_p.maxScroll
     end
+    if self_p.expandSpace then operation(ds, self, true) end
     for elem in iterateElementChildren(self) do
         local elem_p = priv[elem]
-        if elem_p.layoutIndex and ds ~= 0 and self_p.expandSpace then
-            if self_p.justifyChildren == "left" then
-                operation(dx, elem, -(elem_p.layoutIndex - (self_p.spaceAround and 0 or 1)) * ds / ns)
-            elseif self_p.justifyChildren == "center" then
-                operation(dx, elem, (elem_p.layoutIndex - (self_p.spaceAround and 0 or 1) - (self_p.layoutCount + 1) / 2) * ds / ns)
-            elseif self_p.justifyChildren == "right" then
-                operation(dx, elem, (self_p.layoutCount - elem_p.layoutIndex + (self_p.spaceAround and 0 or 1)) * ds / ns)
-            elseif self_p.justifyChildren == "top" then
-                operation(dy, elem, -(elem_p.layoutIndex - (self_p.spaceAround and 0 or 1)) * ds / ns)
-            elseif self_p.justifyChildren == "middle" then
-                operation(dy, elem, (elem_p.layoutIndex - (self_p.spaceAround and 0 or 1) - (self_p.layoutCount + 1) / 2) * ds / ns)
-            elseif self_p.justifyChildren == "bottom" then
-                operation(dy, elem, (self_p.layoutCount - elem_p.layoutIndex + (self_p.spaceAround and 0 or 1)) * ds / ns)
-            end
-        end
         if elem_p.inLayout and scr ~= 0 then
             if self_p.layoutDirection == "row" then
                 operation(dx, elem, scr)
@@ -334,8 +318,8 @@ function dw(self, d)
             operation(dw, elem, d)
         end
     end
-    if self_p.layoutIndex and parent_p.layoutDirection == "row" then dExtraSp(self_p.parent or Element, -d) end
-    if self_p.layoutDirection == "row" then dExtraSp(self, d) end
+    if self_p.layoutIndex and parent_p.layoutDirection == "row" then droom(self_p.parent or Element, -d) end
+    if self_p.layoutDirection == "row" then droom(self, d) end
     dirty[self] = true
 end
 
@@ -429,8 +413,8 @@ function dh(self, d)
             operation(dh, elem, d)
         end
     end
-    if self_p.layoutIndex and parent_p.layoutDirection == "column" then dExtraSp(self_p.parent or Element, -d) end
-    if self_p.layoutDirection == "column" then dExtraSp(self, d) end
+    if self_p.layoutIndex and parent_p.layoutDirection == "column" then droom(self_p.parent or Element, -d) end
+    if self_p.layoutDirection == "column" then droom(self, d) end
     dirty[self] = true
 end
 
@@ -453,7 +437,7 @@ function dmx(self, l, r)
     elseif self_p.anchorX == "right" then
         if r ~= 0 then operation(dx, self, -r) end
         if d ~= 0 and parent_p.layoutDirection == "row" and self_p.layoutIndex then
-            for sib in iterateElement(self) do
+            for sib in backtrackElement(self) do
                 local sib_p = priv[sib]
                 if sib_p.inLayout then
                     operation(dx, sib, -d)
@@ -479,7 +463,7 @@ function dmx(self, l, r)
             operation(dw, self, -d)
         end
     end
-    if self_p.layoutIndex and parent_p.layoutDirection == "row" then dExtraSp(self_p.parent or Element, -d) end
+    if self_p.layoutIndex and parent_p.layoutDirection == "row" then droom(self_p.parent or Element, -d) end
 end
 
 function dmy(self, t, b)
@@ -501,7 +485,7 @@ function dmy(self, t, b)
     elseif self_p.anchorY == "bottom" then
         if b ~= 0 then operation(dy, self, -b) end
         if d ~= 0 and parent_p.layoutDirection == "column" and self_p.layoutIndex then
-            for sib in iterateElement(self) do
+            for sib in backtrackElement(self) do
                 local sib_p = priv[sib]
                 if sib_p.inLayout then
                     operation(dy, sib, -d)
@@ -527,7 +511,7 @@ function dmy(self, t, b)
             operation(dh, self, -d)
         end
     end
-    if self_p.layoutIndex and parent_p.layoutDirection == "column" then dExtraSp(self_p.parent or Element, -d) end
+    if self_p.layoutIndex and parent_p.layoutDirection == "column" then droom(self_p.parent or Element, -d) end
 end
 
 function dpx(self, l, r)
@@ -558,7 +542,7 @@ function dpx(self, l, r)
             end
         end
     end
-    if self_p.layoutDirection == "row" then dExtraSp(self, -d) end
+    if self_p.layoutDirection == "row" then droom(self, -d) end
 end
 
 function dpy(self, t, b)
@@ -589,11 +573,12 @@ function dpy(self, t, b)
             end
         end
     end
-    if self_p.layoutDirection == "column" then dExtraSp(self, -d) end
+    if self_p.layoutDirection == "column" then droom(self, -d) end
 end
 
-function ds(self, d)
-    local ns = math.max(self_p.layoutCount + (self_p.spaceAround and 1 or -1), 0)
+function ds(self, d, isdroom)
+    local self_p = priv[self]
+    self_p.totalSpace = self_p.totalSpace + d
     local tr
     if self_p.justifyChildren == "left" or self_p.justifyChildren == "top" then
         tr = self_p.spaceAround and -d or 0
@@ -613,39 +598,97 @@ function ds(self, d)
         end
         if elem_p.layoutIndex then tr = tr + d end
     end
-    dExtraSp(self, -d * ns)
+    if not isdroom then
+        self_p.space = self_p.space + d
+        droom(self, -d * math.max(self_p.layoutCount + (self_p.spaceAround and 1 or -1), 0))
+    end
 end
 
 -- event hooks
 
-function addToLayout(self)
+local function anchor(self)
+    local self_p = priv[self]
+    local parent_p = priv[self_p.parent] or Element_p
+    if self_p.inLayout and parent_p.justifyChildren == "left" then
+        self_p.anchorX = "left"
+        operation(dx, self, parent_p.l + parent_p.lp + parent_p.scroll + (parent_p.spaceAround and parent_p.totalSpace/2 or 0) + self_p.ox - self_p.x)
+    elseif self_p.inLayout and parent_p.justifyChildren == "center" then
+        self_p.anchorX = "center"
+        operation(dx, self, parent_p.l + parent_p.lp + parent_p.scroll + (parent_p.spaceAround and parent_p.totalSpace/2 or 0) + self_p.ox - self_p.x + parent_p.extraRoom/2)
+    elseif self_p.inLayout and parent_p.justifyChildren == "right" then
+        self_p.anchorX = "right"
+        operation(dx, self, parent_p.l + parent_p.lp + parent_p.scroll + (parent_p.spaceAround and parent_p.totalSpace/2 or 0) + self_p.ox - self_p.x + parent_p.extraRoom)
+    elseif (self_p.alignX or self_p.inLayout and parent_p.alignChildren) == "left" then
+        self_p.anchorX = "left"
+        operation(dx, self, parent_p.l + parent_p.lp + self_p.lm + self_p.w/2 + self_p.ox - self_p.x)
+    elseif (self_p.alignX or self_p.inLayout and parent_p.alignChildren) == "center" or (not self_p.inLayout and not self_p.alignX) then
+        self_p.anchorX = "center"
+        operation(dx, self, parent_p.x + self_p.ox - self_p.x)
+    elseif (self_p.alignX or self_p.inLayout and parent_p.alignChildren) == "right" then
+        self_p.anchorX = "right"
+        operation(dx, self, parent_p.r - parent_p.rp - self_p.rm - self_p.w/2 + self_p.ox - self_p.x)
+    end
+    if self_p.inLayout and parent_p.justifyChildren == "top" then
+        self_p.anchorY = "top"
+        operation(dy, self, parent_p.t + parent_p.tp + parent_p.scroll + (parent_p.spaceAround and parent_p.totalSpace/2 or 0) + self_p.oy - self_p.y)
+    elseif self_p.inLayout and parent_p.justifyChildren == "middle" then
+        self_p.anchorY = "middle"
+        operation(dy, self, parent_p.t + parent_p.tp + parent_p.scroll + (parent_p.spaceAround and parent_p.totalSpace/2 or 0) + self_p.oy - self_p.y + parent_p.extraRoom/2)
+    elseif self_p.inLayout and parent_p.justifyChildren == "bottom" then
+        self_p.anchorY = "bottom"
+        operation(dy, self, parent_p.t + parent_p.tp + parent_p.scroll + (parent_p.spaceAround and parent_p.totalSpace/2 or 0) + self_p.oy - self_p.y + parent_p.extraRoom)
+    elseif (self_p.alignY or self_p.inLayout and parent_p.alignChildren) == "top" then
+        self_p.anchorY = "top"
+        operation(dy, self, parent_p.t + parent_p.tp + self_p.tm + self_p.h/2 + self_p.oy - self_p.y)
+    elseif (self_p.alignY or self_p.inLayout and parent_p.alignChildren) == "middle" or (not self_p.inLayout and not self_p.alignY) then
+        self_p.anchorY = "middle"
+        operation(dy, self, parent_p.y + self_p.oy - self_p.y)
+    elseif (self_p.alignY or self_p.inLayout and parent_p.alignChildren) == "bottom" then
+        self_p.anchorY = "bottom"
+        operation(dy, self, parent_p.b - parent_p.bp - self_p.bm - self_p.h/2 + self_p.oy - self_p.y)
+    end
+    if self_p.inLayout then
+        for sib in backtrackElement(self) do
+            local sib_p = priv[sib]
+            if sib_p.layoutIndex then
+                if parent_p.layoutDirection == "row" then
+                    operation(dx, self, sib_p.lm + sib_p.w + sib_p.rm + parent_p.totalSpace)
+                elseif parent_p.layoutDirection == "column" then
+                    operation(dy, self, sib_p.tm + sib_p.h + sib_p.bm + parent_p.totalSpace)
+                end
+            end
+        end
+    end
+end
+
+local function addToLayout(self)
     local self_p = priv[self]
     local parent_p = priv[self_p.parent] or Element_p
     if parent_p.justifyChildren == "left" then
-        operation(dx, self, parent_p.space/2 + self_p.lm + self_p.w/2)
+        operation(dx, self, (parent_p.layoutCount > 0 and  parent_p.totalSpace/2 or 0) + self_p.lm + self_p.w/2)
     elseif parent_p.justifyChildren == "center" then
         operation(dx, self, self_p.lm/2 - self_p.rm/2)
     elseif parent_p.justifyChildren == "right" then
-        operation(dx, self, -parent_p.space/2 - self_p.rm - self_p.w/2)
+        operation(dx, self, (parent_p.layoutCount > 0 and -parent_p.totalSpace/2 or 0) - self_p.rm - self_p.w/2)
     elseif parent_p.justifyChildren == "top" then
-        operation(dy, self, parent_p.space/2 + self_p.tm + self_p.h/2)
+        operation(dy, self, (parent_p.layoutCount > 0 and  parent_p.totalSpace/2 or 0) + self_p.tm + self_p.h/2)
     elseif parent_p.justifyChildren == "middle" then
         operation(dy, self, self_p.tm/2 - self_p.bm/2)
     elseif parent_p.justifyChildren == "bottom" then
-        operation(dy, self, -parent_p.space/2 - self_p.bm - self_p.h/2)
+        operation(dy, self, (parent_p.layoutCount > 0 and -parent_p.totalSpace/2 or 0) - self_p.bm - self_p.h/2)
     end
     local index = 1
     for sib in backtrackElement(self) do
         local sib_p = priv[sib]
         if sib_p.layoutIndex then index = index + 1 end
         if parent_p.justifyChildren == "center" then
-            operation(dx, self, -parent_p.space/2 - self_p.lm/2 - self_p.w/2 - self_p.rm/2)
+            operation(dx, sib, (parent_p.layoutCount > 0 and -parent_p.totalSpace/2 or 0) - self_p.lm/2 - self_p.w/2 - self_p.rm/2)
         elseif parent_p.justifyChildren == "right" then
-            operation(dx, self, -parent_p.space - self_p.lm - self_p.w - self_p.rm)
+            operation(dx, sib, (parent_p.layoutCount > 0 and -parent_p.totalSpace   or 0) - self_p.lm   - self_p.w   - self_p.rm  )
         elseif parent_p.justifyChildren == "middle" then
-            operation(dy, self, -parent_p.space/2 - self_p.tm/2 - self_p.h/2 - self_p.bm/2)
+            operation(dy, sib, (parent_p.layoutCount > 0 and -parent_p.totalSpace/2 or 0) - self_p.tm/2 - self_p.h/2 - self_p.bm/2)
         elseif parent_p.justifyChildren == "bottom" then
-            operation(dy, self, -parent_p.space - self_p.tm - self_p.h - self_p.bm)
+            operation(dy, sib, (parent_p.layoutCount > 0 and -parent_p.totalSpace   or 0) - self_p.tm   - self_p.h   - self_p.bm  )
         end
     end
     self_p.layoutIndex = index
@@ -653,70 +696,70 @@ function addToLayout(self)
         local sib_p = priv[sib]
         if sib_p.layoutIndex then sib_p.layoutIndex = sib_p.layoutIndex + 1 end
         if parent_p.justifyChildren == "left" then
-            operation(dx, self, parent_p.space + self_p.lm + self_p.w + self_p.rm)
+            operation(dx, sib, (parent_p.layoutCount > 0 and parent_p.totalSpace   or 0) + self_p.lm   + self_p.w   + self_p.rm  )
         elseif parent_p.justifyChildren == "center" then
-            operation(dx, self, parent_p.space/2 + self_p.lm/2 + self_p.w/2 + self_p.rm/2)
+            operation(dx, sib, (parent_p.layoutCount > 0 and parent_p.totalSpace/2 or 0) + self_p.lm/2 + self_p.w/2 + self_p.rm/2)
         elseif parent_p.justifyChildren == "top" then
-            operation(dy, self, parent_p.space + self_p.tm + self_p.h + self_p.bm)
+            operation(dy, sib, (parent_p.layoutCount > 0 and parent_p.totalSpace   or 0) + self_p.tm   + self_p.h   + self_p.bm  )
         elseif parent_p.justifyChildren == "middle" then
-            operation(dy, self, parent_p.space/2 + self_p.tm/2 + self_p.h/2 + self_p.bm/2)
+            operation(dy, sib, (parent_p.layoutCount > 0 and parent_p.totalSpace/2 or 0) + self_p.tm/2 + self_p.h/2 + self_p.bm/2)
         end
     end
+    parent_p.layoutCount = parent_p.layoutCount + 1
     if parent_p.layoutDirection == "row" then
-        dExtraSp(self_p.parent or Element, -self_p.lm - self_p.w - self_p.rm)
+        droom(self_p.parent or Element, -self_p.lm - self_p.w - self_p.rm - ((parent_p.layoutCount > 0 or parent_p.spaceAround) and parent_p.totalSpace or 0))
     elseif parent_p.layoutDirection == "column" then
-        dExtraSp(self_p.parent or Element, -self_p.tm - self_p.h - self_p.bm)
+        droom(self_p.parent or Element, -self_p.tm - self_p.h - self_p.bm - ((parent_p.layoutCount > 0 or parent_p.spaceAround) and parent_p.totalSpace or 0))
     end
-    flushOperations()
 end
 
-function removeFromLayout(self)
+local function removeFromLayout(self)
     local self_p = priv[self]
     self_p.layoutIndex = nil
     local parent_p = priv[self_p.parent] or Element_p
+    parent_p.layoutCount = parent_p.layoutCount - 1
     if parent_p.justifyChildren == "left" then
-        operation(dx, self, -parent_p.space/2 - self_p.lm - self_p.w/2)
+        operation(dx, self, (parent_p.layoutCount > 0 and -parent_p.totalSpace/2 or 0) - self_p.lm - self_p.w/2)
     elseif parent_p.justifyChildren == "center" then
         operation(dx, self, self_p.rm/2 - self_p.lm/2)
     elseif parent_p.justifyChildren == "right" then
-        operation(dx, self, parent_p.space/2 + self_p.rm + self_p.w/2)
+        operation(dx, self, (parent_p.layoutCount > 0 and  parent_p.totalSpace/2 or 0) + self_p.rm + self_p.w/2)
     elseif parent_p.justifyChildren == "top" then
-        operation(dy, self, -parent_p.space/2 - self_p.tm - self_p.h/2)
+        operation(dy, self, (parent_p.layoutCount > 0 and -parent_p.totalSpace/2 or 0) - self_p.tm - self_p.h/2)
     elseif parent_p.justifyChildren == "middle" then
         operation(dy, self, self_p.bm/2 - self_p.tm/2)
     elseif parent_p.justifyChildren == "bottom" then
-        operation(dy, self, parent_p.space/2 + self_p.bm + self_p.h/2)
+        operation(dy, self, (parent_p.layoutCount > 0 and  parent_p.totalSpace/2 or 0) + self_p.bm + self_p.h/2)
     end
     for sib in backtrackElement(self) do
         if parent_p.justifyChildren == "center" then
-            operation(dx, self, parent_p.space/2 + self_p.lm/2 + self_p.w/2 + self_p.rm/2)
+            operation(dx, sib, (parent_p.layoutCount > 0 and parent_p.totalSpace/2 or 0) + self_p.lm/2 + self_p.w/2 + self_p.rm/2)
         elseif parent_p.justifyChildren == "right" then
-            operation(dx, self, parent_p.space + self_p.lm + self_p.w + self_p.rm)
+            operation(dx, sib, (parent_p.layoutCount > 0 and parent_p.totalSpace   or 0) + self_p.lm   + self_p.w   + self_p.rm  )
         elseif parent_p.justifyChildren == "middle" then
-            operation(dy, self, parent_p.space/2 + self_p.tm/2 + self_p.h/2 + self_p.bm/2)
+            operation(dy, sib, (parent_p.layoutCount > 0 and parent_p.totalSpace/2 or 0) + self_p.tm/2 + self_p.h/2 + self_p.bm/2)
         elseif parent_p.justifyChildren == "bottom" then
-            operation(dy, self, parent_p.space + self_p.tm + self_p.h + self_p.bm)
+            operation(dy, sib, (parent_p.layoutCount > 0 and parent_p.totalSpace   or 0) + self_p.tm   + self_p.h   + self_p.bm  )
         end
     end
     for sib in iterateElement(self) do
         local sib_p = priv[sib]
         if sib_p.layoutIndex then sib_p.layoutIndex = sib_p.layoutIndex - 1 end
         if parent_p.justifyChildren == "left" then
-            operation(dx, self, -parent_p.space - self_p.lm - self_p.w - self_p.rm)
+            operation(dx, sib, (parent_p.layoutCount > 0 and -parent_p.totalSpace   or 0) - self_p.lm   - self_p.w   - self_p.rm  )
         elseif parent_p.justifyChildren == "center" then
-            operation(dx, self, -parent_p.space/2 - self_p.lm/2 - self_p.w/2 - self_p.rm/2)
+            operation(dx, sib, (parent_p.layoutCount > 0 and -parent_p.totalSpace/2 or 0) - self_p.lm/2 - self_p.w/2 - self_p.rm/2)
         elseif parent_p.justifyChildren == "top" then
-            operation(dy, self, -parent_p.space - self_p.tm - self_p.h - self_p.bm)
+            operation(dy, sib, (parent_p.layoutCount > 0 and -parent_p.totalSpace   or 0) - self_p.tm   - self_p.h   - self_p.bm  )
         elseif parent_p.justifyChildren == "middle" then
-            operation(dy, self, -parent_p.space/2 - self_p.tm/2 - self_p.h/2 - self_p.bm/2)
+            operation(dy, sib, (parent_p.layoutCount > 0 and -parent_p.totalSpace/2 or 0) - self_p.tm/2 - self_p.h/2 - self_p.bm/2)
         end
     end
     if parent_p.layoutDirection == "row" then
-        dExtraSp(self_p.parent or Element, self_p.lm + self_p.w + self_p.rm)
+        droom(self_p.parent or Element, self_p.lm + self_p.w + self_p.rm + ((parent_p.layoutCount > 0 or parent_p.spaceAround) and parent_p.totalSpace or 0))
     elseif parent_p.layoutDirection == "column" then
-        dExtraSp(self_p.parent or Element, self_p.tm + self_p.h + self_p.bm)
+        droom(self_p.parent or Element, self_p.tm + self_p.h + self_p.bm + ((parent_p.layoutCount > 0 or parent_p.spaceAround) and parent_p.totalSpace or 0))
     end
-    flushOperations()
 end
 
 Element:registerHandler("constructed", function(self)
@@ -733,13 +776,13 @@ Element:registerHandler("activated", function(self)
     local self_p = priv[self]
     if firstActivated[self] then firstActivated[self] = true end
     active[self] = true
-    if self_p.inLayout then addToLayout(self) end
+    if self_p.inLayout then addToLayout(self) flushOperations() end
 end)
 
 Element:registerHandler("deactivated", function(self)
     local self_p = priv[self]
     active[self] = nil
-    if self_p.inLayout then removeFromLayout(self) end
+    if self_p.inLayout then removeFromLayout(self) flushOperations() end
 end)
 
 local function added(self, parent)
@@ -766,15 +809,18 @@ local function added(self, parent)
             end
         end
     end
-    for sib in backtrackElement(self) do
-        before[sib][self] = true
+    for sib in backtrackElement(self) do before[sib][self] = true end
+    anchor(self)
+    if firstActivated[self] and active[self] and self_p.inLayout then
+        addToLayout(self)
+    else
+        flushOperations()
     end
-    if firstActivated[self] and active[self] and self_p.inLayout then addToLayout(self) end
 end
 
 local function removed(self, parent)
     local self_p = priv[self]
-    if active[self] and self_p.inLayout then removeFromLayout(self) end
+    if active[self] and self_p.inLayout then removeFromLayout(self) flushOperations() end
     before[self] = {}
     local parent_p = priv[self_p.parentElement] or Element_p
     if self_p.previousElement then
@@ -804,27 +850,27 @@ end)
 -- properties
 
 function setters:x(value)
-    validateElement(self, "caller", false)
+    validateElement(self, "self", false)
     if type(value) ~= "number" then
         error(("Invalid value: number expected, got %s"):(floof.typeOf(value)), 2)
     end
     local self_p = priv[self]
-    operation(dx, self, value - self_p.x, self_p.inLayout)
+    operation(dx, self, value - self_p.x, true)
     flushOperations()
 end
 
 function setters:y(value)
-    validateElement(self, "caller", false)
+    validateElement(self, "self", false)
     if type(value) ~= "number" then
         error(("Invalid value: number expected, got %s"):(floof.typeOf(value)), 2)
     end
     local self_p = priv[self]
-    operation(dy, self, value - self_p.y, self_p.inLayout)
+    operation(dy, self, value - self_p.y, true)
     flushOperations()
 end
 
 function setters:w(value)
-    validateElement(self, "caller", true)
+    validateElement(self, "self", true)
     if type(value) ~= "number" then
         error(("Invalid value: number expected, got %s"):(floof.typeOf(value)), 2)
     end
@@ -835,7 +881,7 @@ function setters:w(value)
 end
 
 function setters:h(value)
-    validateElement(self, "caller", true)
+    validateElement(self, "self", true)
     if type(value) ~= "number" then
         error(("Invalid value: number expected, got %s"):(floof.typeOf(value)), 2)
     end
@@ -846,7 +892,7 @@ function setters:h(value)
 end
 
 function setters:l(value)
-    validateElement(self, "caller", false)
+    validateElement(self, "self", false)
     if type(value) ~= "number" then
         error(("Invalid value: number expected, got %s"):(floof.typeOf(value)), 2)
     end
@@ -866,7 +912,7 @@ function setters:l(value)
 end
 
 function setters:t(value)
-    validateElement(self, "caller", false)
+    validateElement(self, "self", false)
     if type(value) ~= "number" then
         error(("Invalid value: number expected, got %s"):(floof.typeOf(value)), 2)
     end
@@ -886,7 +932,7 @@ function setters:t(value)
 end
 
 function setters:r(value)
-    validateElement(self, "caller", false)
+    validateElement(self, "self", false)
     if type(value) ~= "number" then
         error(("Invalid value: number expected, got %s"):(floof.typeOf(value)), 2)
     end
@@ -906,7 +952,7 @@ function setters:r(value)
 end
 
 function setters:b(value)
-    validateElement(self, "caller", false)
+    validateElement(self, "self", false)
     if type(value) ~= "number" then
         error(("Invalid value: number expected, got %s"):(floof.typeOf(value)), 2)
     end
@@ -926,7 +972,7 @@ function setters:b(value)
 end
 
 function setters:lm(value)
-    validateElement(self, "caller", false)
+    validateElement(self, "self", false)
     if type(value) ~= "number" then
         error(("Invalid value: number expected, got %s"):(floof.typeOf(value)), 2)
     end
@@ -939,7 +985,7 @@ function setters:lm(value)
 end
 
 function setters:tm(value)
-    validateElement(self, "caller", false)
+    validateElement(self, "self", false)
     if type(value) ~= "number" then
         error(("Invalid value: number expected, got %s"):(floof.typeOf(value)), 2)
     end
@@ -952,7 +998,7 @@ function setters:tm(value)
 end
 
 function setters:rm(value)
-    validateElement(self, "caller", false)
+    validateElement(self, "self", false)
     if type(value) ~= "number" then
         error(("Invalid value: number expected, got %s"):(floof.typeOf(value)), 2)
     end
@@ -965,7 +1011,7 @@ function setters:rm(value)
 end
 
 function setters:bm(value)
-    validateElement(self, "caller", false)
+    validateElement(self, "self", false)
     if type(value) ~= "number" then
         error(("Invalid value: number expected, got %s"):(floof.typeOf(value)), 2)
     end
@@ -978,7 +1024,7 @@ function setters:bm(value)
 end
 
 function setters:xm(value)
-    validateElement(self, "caller", false)
+    validateElement(self, "self", false)
     if type(value) ~= "number" then
         error(("Invalid value: number expected, got %s"):(floof.typeOf(value)), 2)
     end
@@ -991,7 +1037,7 @@ function setters:xm(value)
 end
 
 function setters:ym(value)
-    validateElement(self, "caller", false)
+    validateElement(self, "self", false)
     if type(value) ~= "number" then
         error(("Invalid value: number expected, got %s"):(floof.typeOf(value)), 2)
     end
@@ -1004,7 +1050,7 @@ function setters:ym(value)
 end
 
 function setters:m(value)
-    validateElement(self, "caller", false)
+    validateElement(self, "self", false)
     if type(value) ~= "number" then
         error(("Invalid value: number expected, got %s"):(floof.typeOf(value)), 2)
     end
@@ -1018,7 +1064,7 @@ function setters:m(value)
 end
 
 function setters:lp(value)
-    validateElement(self, "caller", true)
+    validateElement(self, "self", true)
     if type(value) ~= "number" then
         error(("Invalid value: number expected, got %s"):(floof.typeOf(value)), 2)
     end
@@ -1031,7 +1077,7 @@ function setters:lp(value)
 end
 
 function setters:tp(value)
-    validateElement(self, "caller", true)
+    validateElement(self, "self", true)
     if type(value) ~= "number" then
         error(("Invalid value: number expected, got %s"):(floof.typeOf(value)), 2)
     end
@@ -1044,7 +1090,7 @@ function setters:tp(value)
 end
 
 function setters:rp(value)
-    validateElement(self, "caller", true)
+    validateElement(self, "self", true)
     if type(value) ~= "number" then
         error(("Invalid value: number expected, got %s"):(floof.typeOf(value)), 2)
     end
@@ -1057,7 +1103,7 @@ function setters:rp(value)
 end
 
 function setters:bp(value)
-    validateElement(self, "caller", true)
+    validateElement(self, "self", true)
     if type(value) ~= "number" then
         error(("Invalid value: number expected, got %s"):(floof.typeOf(value)), 2)
     end
@@ -1070,7 +1116,7 @@ function setters:bp(value)
 end
 
 function setters:xp(value)
-    validateElement(self, "caller", true)
+    validateElement(self, "self", true)
     if type(value) ~= "number" then
         error(("Invalid value: number expected, got %s"):(floof.typeOf(value)), 2)
     end
@@ -1083,7 +1129,7 @@ function setters:xp(value)
 end
 
 function setters:yp(value)
-    validateElement(self, "caller", true)
+    validateElement(self, "self", true)
     if type(value) ~= "number" then
         error(("Invalid value: number expected, got %s"):(floof.typeOf(value)), 2)
     end
@@ -1096,7 +1142,7 @@ function setters:yp(value)
 end
 
 function setters:p(value)
-    validateElement(self, "caller", true)
+    validateElement(self, "self", true)
     if type(value) ~= "number" then
         error(("Invalid value: number expected, got %s"):(floof.typeOf(value)), 2)
     end
@@ -1110,7 +1156,7 @@ function setters:p(value)
 end
 
 function setters:space(value)
-    validateElement(self, "caller", true)
+    validateElement(self, "self", true)
     if type(value) ~= "number" then
         error(("Invalid value: number expected, got %s"):(floof.typeOf(value)), 2)
     end
@@ -1123,7 +1169,7 @@ function setters:space(value)
 end
 
 function setters:ox(value)
-    validateElement(self, "caller", false)
+    validateElement(self, "self", false)
     if type(value) ~= "number" then
         error(("Invalid value: number expected, got %s"):(floof.typeOf(value)), 2)
     end
@@ -1133,7 +1179,7 @@ function setters:ox(value)
 end
 
 function setters:oy(value)
-    validateElement(self, "caller", false)
+    validateElement(self, "self", false)
     if type(value) ~= "number" then
         error(("Invalid value: number expected, got %s"):(floof.typeOf(value)), 2)
     end
@@ -1143,7 +1189,7 @@ function setters:oy(value)
 end
 
 function setters:width(value)
-    validateElement(self, "caller", false)
+    validateElement(self, "self", false)
     if value == nil then
         self_p.width = nil
         return
@@ -1165,7 +1211,7 @@ function setters:width(value)
 end
 
 function setters:height(value)
-    validateElement(self, "caller", false)
+    validateElement(self, "self", false)
     if value == nil then
         self_p.height = nil
         return
@@ -1187,7 +1233,7 @@ function setters:height(value)
 end
 
 function setters:leftMargin(value)
-    validateElement(self, "caller", false)
+    validateElement(self, "self", false)
     if value == nil then
         self_p.leftMargin = nil
         return
@@ -1215,7 +1261,7 @@ function setters:leftMargin(value)
 end
 
 function setters:topMargin(value)
-    validateElement(self, "caller", false)
+    validateElement(self, "self", false)
     if value == nil then
         self_p.topMargin = nil
         return
@@ -1243,7 +1289,7 @@ function setters:topMargin(value)
 end
 
 function setters:rightMargin(value)
-    validateElement(self, "caller", false)
+    validateElement(self, "self", false)
     if value == nil then
         self_p.rightMargin = nil
         return
@@ -1271,7 +1317,7 @@ function setters:rightMargin(value)
 end
 
 function setters:bottomMargin(value)
-    validateElement(self, "caller", false)
+    validateElement(self, "self", false)
     if value == nil then
         self_p.bottomMargin = nil
         return
@@ -1299,7 +1345,7 @@ function setters:bottomMargin(value)
 end
 
 function setters:horizontalMargin(value)
-    validateElement(self, "caller", false)
+    validateElement(self, "self", false)
     if value == nil then
         self_p.leftMargin, self_p.rightMargin = nil
         return
@@ -1327,7 +1373,7 @@ function setters:horizontalMargin(value)
 end
 
 function setters:verticalMargin(value)
-    validateElement(self, "caller", false)
+    validateElement(self, "self", false)
     if value == nil then
         self_p.topMargin, self_p.bottomMargin = nil
         return
@@ -1355,7 +1401,7 @@ function setters:verticalMargin(value)
 end
 
 function setters:margin(value)
-    validateElement(self, "caller", false)
+    validateElement(self, "self", false)
     if value == nil then
         self_p.leftMargin, self_p.topMargin, self_p.rightMargin, self_p.bottomMargin = nil
         return
@@ -1390,7 +1436,7 @@ function setters:margin(value)
 end
 
 function setters:leftPadding(value)
-    validateElement(self, "caller", true)
+    validateElement(self, "self", true)
     if value == nil then
         self_p.leftPadding = nil
         return
@@ -1411,7 +1457,7 @@ function setters:leftPadding(value)
 end
 
 function setters:topPadding(value)
-    validateElement(self, "caller", true)
+    validateElement(self, "self", true)
     if value == nil then
         self_p.topPadding = nil
         return
@@ -1432,7 +1478,7 @@ function setters:topPadding(value)
 end
 
 function setters:rightPadding(value)
-    validateElement(self, "caller", true)
+    validateElement(self, "self", true)
     if value == nil then
         self_p.rightPadding = nil
         return
@@ -1453,7 +1499,7 @@ function setters:rightPadding(value)
 end
 
 function setters:bottomPadding(value)
-    validateElement(self, "caller", true)
+    validateElement(self, "self", true)
     if value == nil then
         self_p.bottomPadding = nil
         return
@@ -1474,7 +1520,7 @@ function setters:bottomPadding(value)
 end
 
 function setters:horizontalPadding(value)
-    validateElement(self, "caller", true)
+    validateElement(self, "self", true)
     if value == nil then
         self_p.leftPadding, self_p.rightPadding = nil
         return
@@ -1495,7 +1541,7 @@ function setters:horizontalPadding(value)
 end
 
 function setters:verticalPadding(value)
-    validateElement(self, "caller", true)
+    validateElement(self, "self", true)
     if value == nil then
         self_p.topPadding, self_p.bottomPadding = nil
         return
@@ -1516,7 +1562,7 @@ function setters:verticalPadding(value)
 end
 
 function setters:padding(value)
-    validateElement(self, "caller", true)
+    validateElement(self, "self", true)
     if value == nil then
         self_p.leftPadding, self_p.topPadding, self_p.rightPadding, self_p.bottomPadding = nil
         return
@@ -1539,7 +1585,7 @@ function setters:padding(value)
 end
 
 function setters:spacing(value)
-    validateElement(self, "caller", true)
+    validateElement(self, "self", true)
     if value == nil then
         self_p.spacing = nil
         return
@@ -1565,21 +1611,371 @@ function setters:spacing(value)
     flushOperations()
 end
 
+function setters:alignX(value)
+    validateElement(self, "self", false)
+    local self_p = priv[self]
+    if value ~= nil and value ~= "left" and value ~= "center" and value ~= "right" and value ~= "stretch" then
+        error(("Invalid value (%s), must be one of: left, center, right, stretch"):format(value), 2)
+    end
+    local previous = self_p.anchorX
+    self_p.alignX = value
+    local parent_p = priv[self_p.parent] or Element_p
+    value = value or (self_p.inLayout and parent_p.layoutDirection == "column" and parent_p.alignChildren) or "center"
+    if value == previous or self_p.inLayout and parent_p.layoutDirection == "row" then return end
+    self_p.anchorX = value
+    local d, room = 0, parent_p.w - parent_p.lp - parent_p.rp - self_p.w - self_p.lm - self_p.rm
+    if previous == "left" then
+        d = d + room/2
+    elseif previous == "right" then
+        d = d - room/2
+    end
+    if value == "left" then
+        d = d - room/2
+    elseif value == "right" then
+        d = d + room/2
+    elseif value == "stretch" then
+        d = d + self_p.lm/2 - self_p.rm/2
+    end
+    operation(dx, self, d)
+    if value == "stretch" then operation(dw, self, room) end
+    flushOperations()
+end
+
+function setters:alignY(value)
+    validateElement(self, "self", false)
+    local self_p = priv[self]
+    if value ~= nil and value ~= "top" and value ~= "middle" and value ~= "bottom" and value ~= "expand" then
+        error(("Invalid value (%s), must be one of: top, middle, bottom, expand"):format(value), 2)
+    end
+    local previous = self_p.anchorY
+    self_p.alignY = value
+    local parent_p = priv[self_p.parent] or Element_p
+    value = value or (self_p.inLayout and parent_p.layoutDirection == "row" and parent_p.alignChildren) or "middle"
+    if value == previous or self_p.inLayout and parent_p.layoutDirection == "column" then return end
+    self_p.anchorY = value
+    local d, room = 0, parent_p.h - parent_p.tp - parent_p.bp - self_p.h - self_p.tm - self_p.bm
+    if previous == "top" then
+        d = d + room/2
+    elseif previous == "bottom" then
+        d = d - room/2
+    end
+    if value == "top" then
+        d = d - room/2
+    elseif value == "bottom" then
+        d = d + room/2
+    elseif value == "expand" then
+        d = d + self_p.tm/2 - self_p.bm/2
+    end
+    operation(dy, self, d)
+    if value == "stretch" then operation(dh, self, room) end
+    flushOperations()
+end
+
+function setters:align(value)
+    validateElement(self, "self", false)
+    local self_p = priv[self]
+    local x, y
+    if value ~= nil then
+        if type(value) == "string" then
+            local a, b = value:match("^(.-)%-(.-)$")
+            if a and b then
+                if a == "top"  or a == "middle" or a == "bottom" or a == "expand" or
+                   b == "left" or b == "center" or a == "right"  or a == "stretch"
+                then x, y = b, a else x, y = a, b end
+            elseif value == "left" or value == "center" or value == "right"  or value == "stretch" then
+                x = value
+            elseif value == "top"  or value == "middle" or value == "bottom" or value == "expand" then
+                y = value
+            else
+                error(("Invalid value (%s), must be one of: left, center, right, stretch, top, middle, bottom, expand or a hyphen-separated pair of these values"):format(value), 2)
+            end
+        else
+            error(("Invalid value: string expected, got %s"):format(value), 2)
+        end
+    end
+    if x ~= nil and x ~= "left" and x ~= "center" and x ~= "right" and x ~= "stretch" then
+        error(("Invalid X value (%s), must be one of: left, center, right, stretch"):format(x), 2)
+    end
+    if y ~= nil and y ~= "top" and y ~= "middle" and y ~= "bottom" and y ~= "expand" then
+        error(("Invalid Y value (%s), must be one of: top, middle, bottom, expand"):format(x), 2)
+    end
+    local px, py = self_p.anchorX, self_p.anchorY
+    self_p.alignX, self_p.alignY = x, y
+    local parent_p = priv[self_p.parent] or Element_p
+    x = x or (self_p.inLayout and parent_p.layoutDirection == "column" and parent_p.alignChildren) or "center"
+    y = y or (self_p.inLayout and parent_p.layoutDirection == "row"    and parent_p.alignChildren) or "middle"
+    if x ~= px and (not self_p.inLayout or parent_p.layoutDirection ~= "row") then
+        self_p.anchorX = x
+        local d, room = 0, parent_p.w - parent_p.lp - parent_p.rp - self_p.w - self_p.lm - self_p.rm
+        if px == "left" then
+            d = d + room/2
+        elseif px == "right" then
+            d = d - room/2
+        end
+        if px == "left" then
+            d = d - room/2
+        elseif px == "right" then
+            d = d + room/2
+        elseif px == "stretch" then
+            d = d + self_p.lm/2 - self_p.rm/2
+        end
+        operation(dx, self, d)
+        if x == "stretch" then operation(dw, self, room) end
+    end
+    if y ~= py and (not self_p.inLayout or parent_p.layoutDirection ~= "column") then
+        self_p.anchorY = y
+        local d, room = 0, parent_p.h - parent_p.tp - parent_p.bp - self_p.h - self_p.tm - self_p.bm
+        if py == "top" then
+            d = d + room/2
+        elseif py == "bottom" then
+            d = d - room/2
+        end
+        if py == "top" then
+            d = d - room/2
+        elseif py == "bottom" then
+            d = d + room/2
+        elseif py == "expand" then
+            d = d + self_p.tm/2 - self_p.bm/2
+        end
+        operation(dy, self, d)
+        if y == "expand" then operation(dh, self, room) end
+    end
+    flushOperations()
+end
+
+function setters:inLayout(value)
+    validateElement(self, "self", false)
+    if type(value) ~= "boolean" then
+        error(("Invalid value: boolean expected, got %s"):format(floof.typeOf(value)), 2)
+    end
+    local self_p = priv[self]
+    if self_p.inLayout == value then return end
+    self_p.inLayout = value
+    anchor(self)
+    if active[self] then (value and addToLayout or removeFromLayout)(self) end
+    flushOperations()
+end
+
+function setters:layoutDirection(value)
+    validateElement(self, "self", true)
+    if value ~= "row" and value ~= "column" then
+        error(("Invalid value (%s), must be one of: row, column"):format(value), 2)
+    end
+    local self_p = priv[self]
+    if self_p.layoutDirection == value then return end
+    self_p.layoutDirection = value
+    if value == "row" then
+        if self_p.justifyChildren == "top" then
+            self_p.justifyChildren = "left"
+        elseif self_p.justifyChildren == "middle" then
+            self_p.justifyChildren = "center"
+        elseif self_p.justifyChildren == "bottom" then
+            self_p.justifyChildren = "right"
+        end
+        if self_p.alignChildren == "left" then
+            self_p.alignChildren = "top"
+        elseif self_p.alignChildren == "center" then
+            self_p.alignChildren = "middle"
+        elseif self_p.alignChildren == "right" then
+            self_p.alignChildren = "bottom"
+        end
+        local room = self_p.w - self_p.lp - self_p.rp
+        for elem in iterateElementChildren(self) do
+            local elem_p = priv[elem]
+            if elem_p.layoutIndex then
+                room = room - elem_p.w - elem_p.lm - elem_p.rm
+                if elem_p.layout ~= 1 then
+                    room = room - self_p.totalSpace
+                elseif self_p.spaceAround then
+                    room = room - 2*self_p.totalSpace
+                end
+            end
+            anchor(elem)
+        end
+        droom(self, room - self_p.extraRoom)
+    elseif value == "column" then
+        if self_p.justifyChildren == "left" then
+            self_p.justifyChildren = "top"
+        elseif self_p.justifyChildren == "center" then
+            self_p.justifyChildren = "middle"
+        elseif self_p.justifyChildren == "right" then
+            self_p.justifyChildren = "bottom"
+        end
+        if self_p.alignChildren == "top" then
+            self_p.alignChildren = "left"
+        elseif self_p.alignChildren == "middle" then
+            self_p.alignChildren = "center"
+        elseif self_p.alignChildren == "bottom" then
+            self_p.alignChildren = "right"
+        end
+        local room = self_p.h - self_p.tp - self_p.bp
+        for elem in iterateElementChildren(self) do
+            local elem_p = priv[elem]
+            if elem_p.layoutIndex then
+                room = room - elem_p.h - elem_p.tm - elem_p.bm
+                if elem_p.layout ~= 1 then
+                    room = room - self_p.totalSpace
+                elseif self_p.spaceAround then
+                    room = room - 2*self_p.totalSpace
+                end
+            end
+            anchor(elem)
+        end
+        droom(self, room - self_p.extraRoom)
+    end
+    flushOperations()
+end
+
+function setters:justifyChildren(value)
+    validateElement(self, "self", true)
+    local self_p = priv[self]
+    if self_p.layoutDirection == "row" and value ~= "left" and value ~= "center" and value ~= "right" then
+        error(("Invalid value (%s), must be one of: left, center, right"):format(value), 2)
+    elseif self_p.layoutDirection == "column" and value ~= "top" and value ~= "middle" and value ~= "bottom" then
+        error(("Invalid value (%s), must be one of: top, middle, bottom"):format(value), 2)
+    end
+    if self_p.justifyChildren == value then return end
+    local d = 0
+    if self_p.justifyChildren == "left" or self_p.justifyChildren == "top" then
+        d = d + self_p.extraRoom/2
+    elseif self_p.justifyChildren == "center" or self_p.justifyChildren == "middle" then
+        d = d
+    elseif self_p.justifyChildren == "right" or self_p.justifyChildren == "bottom" then
+        d = d - self_p.extraRoom/2
+    end
+    self_p.justifyChildren = value
+    if value == "left" or value == "top" then
+        d = d - self_p.extraRoom/2
+        self_p.minScroll, self_p.maxScroll = math.min(self_p.extraRoom, 0), 0
+    elseif value == "center" or value == "middle" then
+        self_p.minScroll, self_p.maxScroll = math.min(self_p.extraRoom/2, 0), math.max(-self_p.extraRoom/2, 0)
+    elseif value == "right" or value == "bottom" then
+        d = d + self_p.extraRoom/2
+        self_p.minScroll, self_p.maxScroll = 0, math.max(-self_p.extraRoom, 0)
+    end
+    if self_p.scroll < self_p.minScroll then
+        d = d + self_p.minScroll - self_p.scroll
+        self_p.scroll = self_p.minScroll
+    elseif self_p.scroll > self_p.maxScroll then
+        d = d + self_p.maxScroll - self_p.scroll
+        self_p.scroll = self_p.maxScroll
+    end
+    for elem in iterateElementChildren(self) do
+        local elem_p = priv[elem]
+        if elem_p.inLayout then
+            if self_p.layoutDirection == "row" then
+                elem_p.anchorX = value
+                operation(dx, elem, d)
+            elseif self_p.layoutDirection == "column" then
+                elem_p.anchorY = value
+                operation(dy, elem, d)
+            end
+        end
+    end
+end
+
+function setters:alignChildren(value)
+    validateElement(self, "self", true)
+    local self_p = priv[self]
+    if self_p.layoutDirection == "row" and value ~= "top" and value ~= "middle" and value ~= "bottom" and value ~= "expand" then
+        error(("Invalid value (%s), must be one of: top, middle, bottom, expand"):format(value), 2)
+    elseif self_p.layoutDirection == "column" and value ~= "left" and value ~= "center" and value ~= "right" and value ~= "stretch" then
+        error(("Invalid value (%s), must be one of: left, center, right, stretch"):format(value), 2)
+    end
+    if self_p.alignChildren == value then return end
+    local previous = self_p.alignChildren
+    self_p.alignChildren = value
+    for elem in iterateElementChildren(self) do
+        local elem_p = priv[elem]
+        if elem_p.inLayout then
+            if self_p.layoutDirection == "row" and not elem_p.alignY then
+                elem_p.anchorY = value
+                local d, room = 0, self_p.h - self_p.tp - self_p.bp - elem_p.h - elem_p.tm - elem_p.bm
+                if previous == "top" then
+                    d = d + room/2
+                elseif previous == "bottom" then
+                    d = d - room/2
+                end
+                if value == "top" then
+                    d = d - room/2
+                elseif value == "bottom" then
+                    d = d + room/2
+                elseif value == "expand" then
+                    d = d + elem_p.tm/2 - elem_p.bm/2
+                end
+                operation(dy, elem, d)
+                if value == "expand" then operation(dh, elem, room) end
+            elseif self_p.layoutDirection == "column" and not elem_p.alignX then
+                elem_p.anchorX = value
+                local d, room = 0, self_p.w - self_p.lp - self_p.rp - elem_p.w - elem_p.lm - elem_p.rm
+                if previous == "left" then
+                    d = d + room/2
+                elseif previous == "right" then
+                    d = d - room/2
+                end
+                if value == "left" then
+                    d = d - room/2
+                elseif value == "right" then
+                    d = d + room/2
+                elseif value == "stretch" then
+                    d = d + elem_p.lm/2 - elem_p.rm/2
+                end
+                operation(dx, elem, d)
+                if value == "stretch" then operation(dw, elem, room) end
+            end
+        end
+    end
+end
+
+function setters:spaceAround(value)
+    validateElement(self, "self", true)
+    if type(value) ~= "boolean" then
+        error(("Invalid value: boolean expected, got %s"):format(floof.typeOf(value)), 2)
+    end
+    local self_p = priv[self]
+    if self_p.spaceAround == value then return end
+    self_p.spaceAround = value
+    if self_p.layoutCount > 0 then
+        if value then
+            --
+        else
+            --
+        end
+    else
+        if value then
+            --
+        else
+            --
+        end
+    end
+end
+
+function setters:expandSpace(value)
+    validateElement(self, "self", true)
+    if type(value) ~= "boolean" then
+        error(("Invalid value: boolean expected, got %s"):format(floof.typeOf(value)), 2)
+    end
+    local self_p = priv[self]
+    if self_p.expandSpace == value then return end
+    self_p.expandSpace = value
+    --
+end
+
 -- sorting order
 
 function isBefore(self, other)
-    validateElement(self, "caller")
+    validateElement(self, "self")
     validateElement(other, "value")
     local self_p, other_p = priv[self], priv[other]
     if self_p.parentElement ~= other_p.parentElement then
-        error("Invalid value: must be an Element sibling of the caller", 2)
+        error("Invalid value: must be an Element sibling of the object", 2)
     end
     return before[self][other] or false
 end
 Element.isBefore = isBefore
 
 function setSortOrder(self, priority)
-    validateElement(self, "caller")
+    validateElement(self, "self")
     if type(priority) ~= "number" then
         error(("Invalid value: number expected, got %s"):format(floof.typeOf(priority)), 2)
     end
@@ -1611,10 +2007,10 @@ function setSortOrder(self, priority)
             before[sib][self], before[self][sib] = true
             if self_p.inLayout and sib_p.inLayout then
                 if self_p.layoutIndex then
-                    operation(move, sib, -self_p[size] - self_p[m1] - self_p[m2] - parent_p.space - parent_p.extraSpace)
+                    operation(move, sib, -self_p[size] - self_p[m1] - self_p[m2] - parent_p.totalSpace)
                 end
                 if sib_p.layoutIndex then
-                    moveself = moveself + sib_p[size] + sib_p[m1] + sib_p[m2] + parent_p.space + parent_p.extraSpace
+                    moveself = moveself + sib_p[size] + sib_p[m1] + sib_p[m2] + parent_p.totalSpace
                 end
                 if self_p.layoutIndex and sib_p.layoutIndex then
                     self_p.layoutIndex = self_p.layoutIndex + 1
@@ -1641,10 +2037,10 @@ function setSortOrder(self, priority)
             before[self][sib], before[sib][self] = true
             if self_p.inLayout and sib_p.inLayout then
                 if self_p.layoutIndex then
-                    operation(move, sib, self_p[size] + self_p[m1] + self_p[m2] + parent_p.space + parent_p.extraSpace)
+                    operation(move, sib, self_p[size] + self_p[m1] + self_p[m2] + parent_p.totalSpace)
                 end
                 if sib_p.layoutIndex then
-                    moveself = moveself - sib_p[size] - sib_p[m1] - sib_p[m2] - parent_p.space - parent_p.extraSpace
+                    moveself = moveself - sib_p[size] - sib_p[m1] - sib_p[m2] - parent_p.totalSpace
                 end
                 if self_p.layoutIndex and sib_p.layoutIndex then
                     self_p.layoutIndex = self_p.layoutIndex - 1
@@ -1663,12 +2059,12 @@ end
 Element.setSortOrder, setters.sortingPriority = setSortOrder, setSortOrder
 
 function moveBefore(self, nxt)
-    validateElement(self, "caller")
+    validateElement(self, "self")
     if nxt ~= nil then validateElement(nxt, "value") end
-    if self == nxt then error("Invalid value: equal to caller", 2) end
+    if self == nxt then error("Invalid value: equal to self", 2) end
     local self_p, nxt_p = priv[self], priv[nxt]
     if nxt and nxt_p.parentElement ~= self_p.parentElement then
-        error("Invalid value: must be an Element sibling of the caller", 2)
+        error("Invalid value: must be an Element sibling of the object", 2)
     end
     if self_p.nextElement == nxt then return end
     local parent_p = priv[self_p.parentElement] or Element_p
@@ -1697,10 +2093,10 @@ function moveBefore(self, nxt)
             before[sib][self], before[self][sib] = true
             if self_p.inLayout and sib_p.inLayout then
                 if self_p.layoutIndex then
-                    operation(move, sib, -self_p[size] - self_p[m1] - self_p[m2] - parent_p.space - parent_p.extraSpace)
+                    operation(move, sib, -self_p[size] - self_p[m1] - self_p[m2] - parent_p.totalSpace)
                 end
                 if sib_p.layoutIndex then
-                    moveself = moveself + sib_p[size] + sib_p[m1] + sib_p[m2] + parent_p.space + parent_p.extraSpace
+                    moveself = moveself + sib_p[size] + sib_p[m1] + sib_p[m2] + parent_p.totalSpace
                 end
                 if self_p.layoutIndex and sib_p.layoutIndex then
                     self_p.layoutIndex = self_p.layoutIndex + 1
@@ -1726,10 +2122,10 @@ function moveBefore(self, nxt)
             before[self][sib], before[sib][self] = true
             if self_p.inLayout and sib_p.inLayout then
                 if self_p.layoutIndex then
-                    operation(move, sib, self_p[size] + self_p[m1] + self_p[m2] + parent_p.space + parent_p.extraSpace)
+                    operation(move, sib, self_p[size] + self_p[m1] + self_p[m2] + parent_p.totalSpace)
                 end
                 if sib_p.layoutIndex then
-                    moveself = moveself - sib_p[size] - sib_p[m1] - sib_p[m2] - parent_p.space - parent_p.extraSpace
+                    moveself = moveself - sib_p[size] - sib_p[m1] - sib_p[m2] - parent_p.totalSpace
                 end
                 if self_p.layoutIndex and sib_p.layoutIndex then
                     self_p.layoutIndex = self_p.layoutIndex - 1
@@ -1749,12 +2145,12 @@ end
 Element.moveBefore, setters.nextElement = moveBefore, moveBefore
 
 function moveAfter(self, prv)
-    validateElement(self, "caller")
+    validateElement(self, "self")
     if prv ~= nil then validateElement(prv, "value") end
-    if self == prv then error("Invalid value: equal to caller", 2) end
+    if self == prv then error("Invalid value: equal to self", 2) end
     local self_p, prv_p = priv[self], priv[prv]
     if prv and prv_p.parent ~= self_p.parentElement then
-        error("Invalid value: must be an Element sibling of the caller", 2)
+        error("Invalid value: must be an Element sibling of the object", 2)
     end
     if self_p.previousElement == prv then return end
     local parent_p = priv[self_p.parentElement] or Element_p
@@ -1782,10 +2178,10 @@ function moveAfter(self, prv)
             before[sib][self], before[self][sib] = true
             if self_p.inLayout and sib_p.inLayout then
                 if self_p.layoutIndex then
-                    operation(move, sib, -self_p[size] - self_p[m1] - self_p[m2] - parent_p.space - parent_p.extraSpace)
+                    operation(move, sib, -self_p[size] - self_p[m1] - self_p[m2] - parent_p.totalSpace)
                 end
                 if sib_p.layoutIndex then
-                    moveself = moveself + sib_p[size] + sib_p[m1] + sib_p[m2] + parent_p.space + parent_p.extraSpace
+                    moveself = moveself + sib_p[size] + sib_p[m1] + sib_p[m2] + parent_p.totalSpace
                 end
                 if self_p.layoutIndex and sib_p.layoutIndex then
                     self_p.layoutIndex = self_p.layoutIndex + 1
@@ -1813,10 +2209,10 @@ function moveAfter(self, prv)
             before[self][sib], before[sib][self] = true
             if self_p.inLayout and sib_p.inLayout then
                 if self_p.layoutIndex then
-                    operation(move, sib, self_p[size] + self_p[m1] + self_p[m2] + parent_p.space + parent_p.extraSpace)
+                    operation(move, sib, self_p[size] + self_p[m1] + self_p[m2] + parent_p.totalSpace)
                 end
                 if sib_p.layoutIndex then
-                    moveself = moveself - sib_p[size] - sib_p[m1] - sib_p[m2] - parent_p.space - parent_p.extraSpace
+                    moveself = moveself - sib_p[size] - sib_p[m1] - sib_p[m2] - parent_p.totalSpace
                 end
                 if self_p.layoutIndex and sib_p.layoutIndex then
                     self_p.layoutIndex = self_p.layoutIndex - 1
@@ -1835,11 +2231,11 @@ end
 Element.moveAfter, setters.backward = moveAfter, moveAfter
 
 function setFirstChild(self, first)
-    validateObject(self, "caller", true)
+    validateObject(self, "self", true)
     validateObject(first, "value")
     local self_p, first_p = priv[self], priv[first]
     if first_p.parentElement ~= self then
-        error("Invalid value: object must be an Element child of the caller", 2)
+        error("Invalid value: must be an Element child of the object", 2)
     end
     if self_p.firstChildElement == first then return end
     floof.safeInvoke(moveBefore, first, self_p.firstChildElement)
@@ -1847,11 +2243,11 @@ end
 Element.setFirstChild, setters.firstChildElement = setFirstChild, setFirstChild
 
 function setLastChild(self, last)
-    validateObject(self, "caller", true)
+    validateObject(self, "self", true)
     validateObject(last, "value")
     local self_p, last_p = priv[self], priv[last]
     if last_p.parentElement ~= self then
-        error("Invalid value: object must be an Element child of the caller", 2)
+        error("Invalid value: must be an Element child of the object", 2)
     end
     if self_p.lastChildElement == last then return end
     floof.safeInvoke(moveAfter, last, self_p.lastChildElement)
