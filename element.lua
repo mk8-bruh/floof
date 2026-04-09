@@ -1936,18 +1936,27 @@ function setters:spaceAround(value)
     if self_p.spaceAround == value then return end
     self_p.spaceAround = value
     if self_p.layoutCount > 0 then
-        if value then
-            --
-        else
-            --
+        local sign = value and 1 or -1
+        local d = 0
+        if self_p.justifyChildren == "left" or self_p.justifyChildren == "top" then
+            d =  sign * self_p.totalSpace
+        elseif self_p.justifyChildren == "right" or self_p.justifyChildren == "bottom" then
+            d = -sign * self_p.totalSpace
         end
+        for elem in iterateElementChildren(self) do
+            if priv[elem].inLayout then
+                if self_p.layoutDirection == "row" then
+                    operation(dx, elem, d)
+                elseif self_p.layoutDirection == "column" then
+                    operation(dy, elem, d)
+                end
+            end
+        end
+        droom(self, 2 * sign * self_p.totalSpace)
     else
-        if value then
-            --
-        else
-            --
-        end
+        droom(self, (value and 1 or -1) * self_p.totalSpace)
     end
+    flushOperations()
 end
 
 function setters:expandSpace(value)
@@ -1958,7 +1967,17 @@ function setters:expandSpace(value)
     local self_p = priv[self]
     if self_p.expandSpace == value then return end
     self_p.expandSpace = value
-    --
+    local ns = math.max(self_p.layoutCount + (self_p.spaceAround and 1 or -1), 0)
+    if ns > 0 then
+        if value then
+            local d = math.max(self_p.extraRoom, 0) / ns
+            if d > 0 then operation(ds, self, d, true) end
+        else
+            local d = self_p.space - self_p.totalSpace
+            if d < 0 then operation(ds, self, d, true) end
+        end
+    end
+    flushOperations()
 end
 
 -- sorting order
