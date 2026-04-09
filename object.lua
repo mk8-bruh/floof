@@ -278,6 +278,12 @@ function Object:__init(data, ...)
         handleCallback(self, "activated")
         floof.safeInvoke(checkHover, self)
     end
+    for i, obj in ipairs{...} do
+        if not floof.instanceOf(obj, Object) then
+            error(("Invalid child: Object expected, got %s"):format(floof.typeOf(obj)))
+        end
+        floof.safeInvoke(add, obj, self)
+    end
 end
 
 function Object:isConstructed() return priv[self] ~= nil end
