@@ -239,7 +239,7 @@ Object.removeHandler = removeHandler
 
 -- public interface
 
-function Object:__init(data)
+function Object:__init(data, ...)
     if not floof.instanceOf(self, Object) then
         error(("Invalid caller: Object expected, got %s"):format(floof.typeOf(self)), 2)
     end

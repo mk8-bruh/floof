@@ -215,7 +215,7 @@ local function droom(self, d)
         scr = self_p.maxScroll - self_p.scroll
         self_p.scroll = self_p.maxScroll
     end
-    if self_p.expandSpace then operation(ds, self, true) end
+    if self_p.expandSpace and ns > 0 then operation(ds, self, dr / ns, true) end
     for elem in iterateElementChildren(self) do
         local elem_p = priv[elem]
         if elem_p.inLayout and scr ~= 0 then
@@ -318,7 +318,7 @@ function dw(self, d)
             operation(dw, elem, d)
         end
     end
-    if self_p.layoutIndex and parent_p.layoutDirection == "row" then droom(self_p.parent or Element, -d) end
+    if self_p.layoutIndex and parent_p.layoutDirection == "row" then droom(self_p.parentElement or Element, -d) end
     if self_p.layoutDirection == "row" then droom(self, d) end
     dirty[self] = true
 end
@@ -413,14 +413,14 @@ function dh(self, d)
             operation(dh, elem, d)
         end
     end
-    if self_p.layoutIndex and parent_p.layoutDirection == "column" then droom(self_p.parent or Element, -d) end
+    if self_p.layoutIndex and parent_p.layoutDirection == "column" then droom(self_p.parentElement or Element, -d) end
     if self_p.layoutDirection == "column" then droom(self, d) end
     dirty[self] = true
 end
 
 function dmx(self, l, r)
     local self_p = priv[self]
-    local parent_p = priv[self_p.parent] or Element_p
+    local parent_p = priv[self_p.parentElement] or Element_p
     self_p.lm = self_p.lm + l
     self_p.rm = self_p.rm + r
     local d, c = l + r, (l - r) / 2
@@ -463,12 +463,12 @@ function dmx(self, l, r)
             operation(dw, self, -d)
         end
     end
-    if self_p.layoutIndex and parent_p.layoutDirection == "row" then droom(self_p.parent or Element, -d) end
+    if self_p.layoutIndex and parent_p.layoutDirection == "row" then droom(self_p.parentElement or Element, -d) end
 end
 
 function dmy(self, t, b)
     local self_p = priv[self]
-    local parent_p = priv[self_p.parent] or Element_p
+    local parent_p = priv[self_p.parentElement] or Element_p
     self_p.tm = self_p.tm + t
     self_p.bm = self_p.bm + b
     local d, c = t + b, (t - b) / 2
@@ -511,7 +511,7 @@ function dmy(self, t, b)
             operation(dh, self, -d)
         end
     end
-    if self_p.layoutIndex and parent_p.layoutDirection == "column" then droom(self_p.parent or Element, -d) end
+    if self_p.layoutIndex and parent_p.layoutDirection == "column" then droom(self_p.parentElement or Element, -d) end
 end
 
 function dpx(self, l, r)
@@ -608,7 +608,7 @@ end
 
 local function anchor(self)
     local self_p = priv[self]
-    local parent_p = priv[self_p.parent] or Element_p
+    local parent_p = priv[self_p.parentElement] or Element_p
     if self_p.inLayout and parent_p.justifyChildren == "left" then
         self_p.anchorX = "left"
         operation(dx, self, parent_p.l + parent_p.lp + parent_p.scroll + (parent_p.spaceAround and parent_p.totalSpace/2 or 0) + self_p.ox - self_p.x)
@@ -663,7 +663,7 @@ end
 
 local function addToLayout(self)
     local self_p = priv[self]
-    local parent_p = priv[self_p.parent] or Element_p
+    local parent_p = priv[self_p.parentElement] or Element_p
     if parent_p.justifyChildren == "left" then
         operation(dx, self, (parent_p.layoutCount > 0 and  parent_p.totalSpace/2 or 0) + self_p.lm + self_p.w/2)
     elseif parent_p.justifyChildren == "center" then
@@ -707,16 +707,16 @@ local function addToLayout(self)
     end
     parent_p.layoutCount = parent_p.layoutCount + 1
     if parent_p.layoutDirection == "row" then
-        droom(self_p.parent or Element, -self_p.lm - self_p.w - self_p.rm - ((parent_p.layoutCount > 0 or parent_p.spaceAround) and parent_p.totalSpace or 0))
+        droom(self_p.parentElement or Element, -self_p.lm - self_p.w - self_p.rm - ((parent_p.layoutCount > 0 or parent_p.spaceAround) and parent_p.totalSpace or 0))
     elseif parent_p.layoutDirection == "column" then
-        droom(self_p.parent or Element, -self_p.tm - self_p.h - self_p.bm - ((parent_p.layoutCount > 0 or parent_p.spaceAround) and parent_p.totalSpace or 0))
+        droom(self_p.parentElement or Element, -self_p.tm - self_p.h - self_p.bm - ((parent_p.layoutCount > 0 or parent_p.spaceAround) and parent_p.totalSpace or 0))
     end
 end
 
 local function removeFromLayout(self)
     local self_p = priv[self]
     self_p.layoutIndex = nil
-    local parent_p = priv[self_p.parent] or Element_p
+    local parent_p = priv[self_p.parentElement] or Element_p
     parent_p.layoutCount = parent_p.layoutCount - 1
     if parent_p.justifyChildren == "left" then
         operation(dx, self, (parent_p.layoutCount > 0 and -parent_p.totalSpace/2 or 0) - self_p.lm - self_p.w/2)
@@ -756,9 +756,9 @@ local function removeFromLayout(self)
         end
     end
     if parent_p.layoutDirection == "row" then
-        droom(self_p.parent or Element, self_p.lm + self_p.w + self_p.rm + ((parent_p.layoutCount > 0 or parent_p.spaceAround) and parent_p.totalSpace or 0))
+        droom(self_p.parentElement or Element, self_p.lm + self_p.w + self_p.rm + ((parent_p.layoutCount > 0 or parent_p.spaceAround) and parent_p.totalSpace or 0))
     elseif parent_p.layoutDirection == "column" then
-        droom(self_p.parent or Element, self_p.tm + self_p.h + self_p.bm + ((parent_p.layoutCount > 0 or parent_p.spaceAround) and parent_p.totalSpace or 0))
+        droom(self_p.parentElement or Element, self_p.tm + self_p.h + self_p.bm + ((parent_p.layoutCount > 0 or parent_p.spaceAround) and parent_p.totalSpace or 0))
     end
 end
 
@@ -774,7 +774,7 @@ end)
 
 Element:registerHandler("activated", function(self)
     local self_p = priv[self]
-    if firstActivated[self] then firstActivated[self] = true end
+    if not firstActivated[self] then firstActivated[self] = true end
     active[self] = true
     if self_p.inLayout then addToLayout(self) flushOperations() end
 end)
@@ -852,7 +852,7 @@ end)
 function setters:x(value)
     validateElement(self, "self", false)
     if type(value) ~= "number" then
-        error(("Invalid value: number expected, got %s"):(floof.typeOf(value)), 2)
+        error(("Invalid value: number expected, got %s"):format(floof.typeOf(value)), 2)
     end
     local self_p = priv[self]
     operation(dx, self, value - self_p.x, true)
@@ -862,7 +862,7 @@ end
 function setters:y(value)
     validateElement(self, "self", false)
     if type(value) ~= "number" then
-        error(("Invalid value: number expected, got %s"):(floof.typeOf(value)), 2)
+        error(("Invalid value: number expected, got %s"):format(floof.typeOf(value)), 2)
     end
     local self_p = priv[self]
     operation(dy, self, value - self_p.y, true)
@@ -872,7 +872,7 @@ end
 function setters:w(value)
     validateElement(self, "self", true)
     if type(value) ~= "number" then
-        error(("Invalid value: number expected, got %s"):(floof.typeOf(value)), 2)
+        error(("Invalid value: number expected, got %s"):format(floof.typeOf(value)), 2)
     end
     local self_p = priv[self]
     if self_p.width then error("Cannot modify the raw width of an Element with dynamic width", 2) end
@@ -883,7 +883,7 @@ end
 function setters:h(value)
     validateElement(self, "self", true)
     if type(value) ~= "number" then
-        error(("Invalid value: number expected, got %s"):(floof.typeOf(value)), 2)
+        error(("Invalid value: number expected, got %s"):format(floof.typeOf(value)), 2)
     end
     local self_p = priv[self]
     if self_p.height then error("Cannot modify the raw height of an Element with dynamic height", 2) end
@@ -894,7 +894,7 @@ end
 function setters:l(value)
     validateElement(self, "self", false)
     if type(value) ~= "number" then
-        error(("Invalid value: number expected, got %s"):(floof.typeOf(value)), 2)
+        error(("Invalid value: number expected, got %s"):format(floof.typeOf(value)), 2)
     end
     local self_p = priv[self]
     local d = value - self_p.l
@@ -914,7 +914,7 @@ end
 function setters:t(value)
     validateElement(self, "self", false)
     if type(value) ~= "number" then
-        error(("Invalid value: number expected, got %s"):(floof.typeOf(value)), 2)
+        error(("Invalid value: number expected, got %s"):format(floof.typeOf(value)), 2)
     end
     local self_p = priv[self]
     local d = value - self_p.t
@@ -934,7 +934,7 @@ end
 function setters:r(value)
     validateElement(self, "self", false)
     if type(value) ~= "number" then
-        error(("Invalid value: number expected, got %s"):(floof.typeOf(value)), 2)
+        error(("Invalid value: number expected, got %s"):format(floof.typeOf(value)), 2)
     end
     local self_p = priv[self]
     local d = value - self_p.r
@@ -954,7 +954,7 @@ end
 function setters:b(value)
     validateElement(self, "self", false)
     if type(value) ~= "number" then
-        error(("Invalid value: number expected, got %s"):(floof.typeOf(value)), 2)
+        error(("Invalid value: number expected, got %s"):format(floof.typeOf(value)), 2)
     end
     local self_p = priv[self]
     local d = value - self_p.b
@@ -974,7 +974,7 @@ end
 function setters:lm(value)
     validateElement(self, "self", false)
     if type(value) ~= "number" then
-        error(("Invalid value: number expected, got %s"):(floof.typeOf(value)), 2)
+        error(("Invalid value: number expected, got %s"):format(floof.typeOf(value)), 2)
     end
     local self_p = priv[self]
     if self_p.leftMargin then
@@ -987,7 +987,7 @@ end
 function setters:tm(value)
     validateElement(self, "self", false)
     if type(value) ~= "number" then
-        error(("Invalid value: number expected, got %s"):(floof.typeOf(value)), 2)
+        error(("Invalid value: number expected, got %s"):format(floof.typeOf(value)), 2)
     end
     local self_p = priv[self]
     if self_p.topMargin then
@@ -1000,7 +1000,7 @@ end
 function setters:rm(value)
     validateElement(self, "self", false)
     if type(value) ~= "number" then
-        error(("Invalid value: number expected, got %s"):(floof.typeOf(value)), 2)
+        error(("Invalid value: number expected, got %s"):format(floof.typeOf(value)), 2)
     end
     local self_p = priv[self]
     if self_p.rightMargin then
@@ -1013,7 +1013,7 @@ end
 function setters:bm(value)
     validateElement(self, "self", false)
     if type(value) ~= "number" then
-        error(("Invalid value: number expected, got %s"):(floof.typeOf(value)), 2)
+        error(("Invalid value: number expected, got %s"):format(floof.typeOf(value)), 2)
     end
     local self_p = priv[self]
     if self_p.bottomMargin then
@@ -1026,7 +1026,7 @@ end
 function setters:xm(value)
     validateElement(self, "self", false)
     if type(value) ~= "number" then
-        error(("Invalid value: number expected, got %s"):(floof.typeOf(value)), 2)
+        error(("Invalid value: number expected, got %s"):format(floof.typeOf(value)), 2)
     end
     local self_p = priv[self]
     if self_p.leftMargin or self_p.rightMargin then
@@ -1039,7 +1039,7 @@ end
 function setters:ym(value)
     validateElement(self, "self", false)
     if type(value) ~= "number" then
-        error(("Invalid value: number expected, got %s"):(floof.typeOf(value)), 2)
+        error(("Invalid value: number expected, got %s"):format(floof.typeOf(value)), 2)
     end
     local self_p = priv[self]
     if self_p.topMargin or self_p.bottomMargin then
@@ -1052,21 +1052,22 @@ end
 function setters:m(value)
     validateElement(self, "self", false)
     if type(value) ~= "number" then
-        error(("Invalid value: number expected, got %s"):(floof.typeOf(value)), 2)
+        error(("Invalid value: number expected, got %s"):format(floof.typeOf(value)), 2)
     end
     local self_p = priv[self]
     if self_p.leftMargin or self_p.topMargin or self_p.rightMargin or self_p.bottomMargin then
         error("Cannot modify the raw margin of an Element with a dynamic margin", 2)
     else
-    operation(dmx, self, value - self_p.lm, value - self_p.rm)
-    operation(dmy, self, value - self_p.tm, value - self_p.bm)
-    flushOperations()
+        operation(dmx, self, value - self_p.lm, value - self_p.rm)
+        operation(dmy, self, value - self_p.tm, value - self_p.bm)
+        flushOperations()
+    end
 end
 
 function setters:lp(value)
     validateElement(self, "self", true)
     if type(value) ~= "number" then
-        error(("Invalid value: number expected, got %s"):(floof.typeOf(value)), 2)
+        error(("Invalid value: number expected, got %s"):format(floof.typeOf(value)), 2)
     end
     local self_p = priv[self]
     if self_p.leftPadding then
@@ -1079,7 +1080,7 @@ end
 function setters:tp(value)
     validateElement(self, "self", true)
     if type(value) ~= "number" then
-        error(("Invalid value: number expected, got %s"):(floof.typeOf(value)), 2)
+        error(("Invalid value: number expected, got %s"):format(floof.typeOf(value)), 2)
     end
     local self_p = priv[self]
     if self_p.topPadding then
@@ -1092,7 +1093,7 @@ end
 function setters:rp(value)
     validateElement(self, "self", true)
     if type(value) ~= "number" then
-        error(("Invalid value: number expected, got %s"):(floof.typeOf(value)), 2)
+        error(("Invalid value: number expected, got %s"):format(floof.typeOf(value)), 2)
     end
     local self_p = priv[self]
     if self_p.rightPadding then
@@ -1105,7 +1106,7 @@ end
 function setters:bp(value)
     validateElement(self, "self", true)
     if type(value) ~= "number" then
-        error(("Invalid value: number expected, got %s"):(floof.typeOf(value)), 2)
+        error(("Invalid value: number expected, got %s"):format(floof.typeOf(value)), 2)
     end
     local self_p = priv[self]
     if self_p.bottomPadding then
@@ -1118,7 +1119,7 @@ end
 function setters:xp(value)
     validateElement(self, "self", true)
     if type(value) ~= "number" then
-        error(("Invalid value: number expected, got %s"):(floof.typeOf(value)), 2)
+        error(("Invalid value: number expected, got %s"):format(floof.typeOf(value)), 2)
     end
     local self_p = priv[self]
     if self_p.leftPadding or self_p.rightPadding then
@@ -1131,7 +1132,7 @@ end
 function setters:yp(value)
     validateElement(self, "self", true)
     if type(value) ~= "number" then
-        error(("Invalid value: number expected, got %s"):(floof.typeOf(value)), 2)
+        error(("Invalid value: number expected, got %s"):format(floof.typeOf(value)), 2)
     end
     local self_p = priv[self]
     if self_p.topPadding or self_p.bottomPadding then
@@ -1144,34 +1145,36 @@ end
 function setters:p(value)
     validateElement(self, "self", true)
     if type(value) ~= "number" then
-        error(("Invalid value: number expected, got %s"):(floof.typeOf(value)), 2)
+        error(("Invalid value: number expected, got %s"):format(floof.typeOf(value)), 2)
     end
     local self_p = priv[self]
     if self_p.leftPadding or self_p.topPadding or self_p.rightPadding or self_p.bottomPadding then
         error("Cannot modify the raw padding of an Element with dynamic padding", 2)
     else
-    operation(dmx, self, value - self_p.lp, value - self_p.rp)
-    operation(dmy, self, value - self_p.tp, value - self_p.bp)
-    flushOperations()
+        operation(dmx, self, value - self_p.lp, value - self_p.rp)
+        operation(dmy, self, value - self_p.tp, value - self_p.bp)
+        flushOperations()
+    end
 end
 
 function setters:space(value)
     validateElement(self, "self", true)
     if type(value) ~= "number" then
-        error(("Invalid value: number expected, got %s"):(floof.typeOf(value)), 2)
+        error(("Invalid value: number expected, got %s"):format(floof.typeOf(value)), 2)
     end
     local self_p = priv[self]
     if self_p.leftPadding or self_p.topPadding or self_p.rightPadding or self_p.bottomPadding then
         error("Cannot modify the raw padding of an Element with dynamic padding", 2)
     else
-    operation(ds, self, value - self_p.space)
-    flushOperations()
+        operation(ds, self, value - self_p.space)
+        flushOperations()
+    end
 end
 
 function setters:ox(value)
     validateElement(self, "self", false)
     if type(value) ~= "number" then
-        error(("Invalid value: number expected, got %s"):(floof.typeOf(value)), 2)
+        error(("Invalid value: number expected, got %s"):format(floof.typeOf(value)), 2)
     end
     local self_p = priv[self]
     operation(dx, self, value - self_p.ox, true)
@@ -1181,7 +1184,7 @@ end
 function setters:oy(value)
     validateElement(self, "self", false)
     if type(value) ~= "number" then
-        error(("Invalid value: number expected, got %s"):(floof.typeOf(value)), 2)
+        error(("Invalid value: number expected, got %s"):format(floof.typeOf(value)), 2)
     end
     local self_p = priv[self]
     operation(dy, self, value - self_p.oy, true)
@@ -1190,6 +1193,7 @@ end
 
 function setters:width(value)
     validateElement(self, "self", false)
+    local self_p = priv[self]
     if value == nil then
         self_p.width = nil
         return
@@ -1201,10 +1205,9 @@ function setters:width(value)
             error(("Invalid value string (%q): must be a valid number or percentage"):format(value), 2)
         end
     elseif type(value) ~= "number" then
-        error(("Invalid value: number expected, got %s"):(floof.typeOf(value)), 2)
+        error(("Invalid value: number expected, got %s"):format(floof.typeOf(value)), 2)
     end
-    local self_p = priv[self]
-    local parent_p = priv[self_p.parent] or Element_p
+    local parent_p = priv[self_p.parentElement] or Element_p
     self_p.width = value
     operation(dw, self, (parent_p.w - parent_p.lp - parent_p.rp) * value - self_p.w)
     flushOperations()
@@ -1212,6 +1215,7 @@ end
 
 function setters:height(value)
     validateElement(self, "self", false)
+    local self_p = priv[self]
     if value == nil then
         self_p.height = nil
         return
@@ -1223,10 +1227,9 @@ function setters:height(value)
             error(("Invalid value string (%q): must be a valid number or percentage"):format(value), 2)
         end
     elseif type(value) ~= "number" then
-        error(("Invalid value: number expected, got %s"):(floof.typeOf(value)), 2)
+        error(("Invalid value: number expected, got %s"):format(floof.typeOf(value)), 2)
     end
-    local self_p = priv[self]
-    local parent_p = priv[self_p.parent] or Element_p
+    local parent_p = priv[self_p.parentElement] or Element_p
     self_p.height = value
     operation(dh, self, (parent_p.h - parent_p.tp - parent_p.bp) * value - self_p.h)
     flushOperations()
@@ -1234,6 +1237,7 @@ end
 
 function setters:leftMargin(value)
     validateElement(self, "self", false)
+    local self_p = priv[self]
     if value == nil then
         self_p.leftMargin = nil
         return
@@ -1245,12 +1249,11 @@ function setters:leftMargin(value)
             error(("Invalid value string (%q): must be a valid number or percentage"):format(value), 2)
         end
     elseif type(value) ~= "number" then
-        error(("Invalid value: number expected, got %s"):(floof.typeOf(value)), 2)
+        error(("Invalid value: number expected, got %s"):format(floof.typeOf(value)), 2)
     end
-    local self_p = priv[self]
     self_p.leftMargin = value
     local d = self_p.w * value - self_p.lm
-    if self_p.anchorX == "stretch" then`
+    if self_p.anchorX == "stretch" then
         self_p.lm = self_p.lm + d
         operation(dx, self, d/2)
         operation(dw, self, -d)
@@ -1262,6 +1265,7 @@ end
 
 function setters:topMargin(value)
     validateElement(self, "self", false)
+    local self_p = priv[self]
     if value == nil then
         self_p.topMargin = nil
         return
@@ -1273,12 +1277,11 @@ function setters:topMargin(value)
             error(("Invalid value string (%q): must be a valid number or percentage"):format(value), 2)
         end
     elseif type(value) ~= "number" then
-        error(("Invalid value: number expected, got %s"):(floof.typeOf(value)), 2)
+        error(("Invalid value: number expected, got %s"):format(floof.typeOf(value)), 2)
     end
-    local self_p = priv[self]
     self_p.topMargin = value
     local d = self_p.h * value - self_p.tm
-    if self_p.anchorY == "stretch" then`
+    if self_p.anchorY == "stretch" then
         self_p.tm = self_p.tm + d
         operation(dy, self, d/2)
         operation(dh, self, -d)
@@ -1290,6 +1293,7 @@ end
 
 function setters:rightMargin(value)
     validateElement(self, "self", false)
+    local self_p = priv[self]
     if value == nil then
         self_p.rightMargin = nil
         return
@@ -1301,12 +1305,11 @@ function setters:rightMargin(value)
             error(("Invalid value string (%q): must be a valid number or percentage"):format(value), 2)
         end
     elseif type(value) ~= "number" then
-        error(("Invalid value: number expected, got %s"):(floof.typeOf(value)), 2)
+        error(("Invalid value: number expected, got %s"):format(floof.typeOf(value)), 2)
     end
-    local self_p = priv[self]
     self_p.rightMargin = value
     local d = self_p.w * value - self_p.rm
-    if self_p.anchorX == "stretch" then`
+    if self_p.anchorX == "stretch" then
         self_p.rm = self_p.rm + d
         operation(dx, self, -d/2)
         operation(dw, self, -d)
@@ -1318,6 +1321,7 @@ end
 
 function setters:bottomMargin(value)
     validateElement(self, "self", false)
+    local self_p = priv[self]
     if value == nil then
         self_p.bottomMargin = nil
         return
@@ -1329,12 +1333,11 @@ function setters:bottomMargin(value)
             error(("Invalid value string (%q): must be a valid number or percentage"):format(value), 2)
         end
     elseif type(value) ~= "number" then
-        error(("Invalid value: number expected, got %s"):(floof.typeOf(value)), 2)
+        error(("Invalid value: number expected, got %s"):format(floof.typeOf(value)), 2)
     end
-    local self_p = priv[self]
     self_p.bottomMargin = value
     local d = self_p.h * value - self_p.bm
-    if self_p.anchorY == "stretch" then`
+    if self_p.anchorY == "stretch" then
         self_p.bm = self_p.bm + d
         operation(dy, self, -d/2)
         operation(dh, self, -d)
@@ -1346,8 +1349,9 @@ end
 
 function setters:horizontalMargin(value)
     validateElement(self, "self", false)
+    local self_p = priv[self]
     if value == nil then
-        self_p.leftMargin, self_p.rightMargin = nil
+        self_p.leftMargin, self_p.rightMargin = nil, nil
         return
     elseif type(value) == "string" then
         local val = tonumber(value:match("^%s*(%d*%.?%d+)%s*%%?%s*$"))
@@ -1357,9 +1361,8 @@ function setters:horizontalMargin(value)
             error(("Invalid value string (%q): must be a valid number or percentage"):format(value), 2)
         end
     elseif type(value) ~= "number" then
-        error(("Invalid value: number expected, got %s"):(floof.typeOf(value)), 2)
+        error(("Invalid value: number expected, got %s"):format(floof.typeOf(value)), 2)
     end
-    local self_p = priv[self]
     self_p.leftMargin, self_p.rightMargin = value, value
     local l, r = self_p.w * value - self_p.lm, self_p.w * value - self_p.rm
     if self_p.anchorX == "stretch" then
@@ -1374,8 +1377,9 @@ end
 
 function setters:verticalMargin(value)
     validateElement(self, "self", false)
+    local self_p = priv[self]
     if value == nil then
-        self_p.topMargin, self_p.bottomMargin = nil
+        self_p.topMargin, self_p.bottomMargin = nil, nil
         return
     elseif type(value) == "string" then
         local val = tonumber(value:match("^%s*(%d*%.?%d+)%s*%%?%s*$"))
@@ -1385,9 +1389,8 @@ function setters:verticalMargin(value)
             error(("Invalid value string (%q): must be a valid number or percentage"):format(value), 2)
         end
     elseif type(value) ~= "number" then
-        error(("Invalid value: number expected, got %s"):(floof.typeOf(value)), 2)
+        error(("Invalid value: number expected, got %s"):format(floof.typeOf(value)), 2)
     end
-    local self_p = priv[self]
     self_p.topMargin, self_p.bottomMargin = value, value
     local t, b = self_p.h * value - self_p.tm, self_p.h * value - self_p.bm
     if self_p.anchorY == "stretch" then
@@ -1402,8 +1405,9 @@ end
 
 function setters:margin(value)
     validateElement(self, "self", false)
+    local self_p = priv[self]
     if value == nil then
-        self_p.leftMargin, self_p.topMargin, self_p.rightMargin, self_p.bottomMargin = nil
+        self_p.leftMargin, self_p.topMargin, self_p.rightMargin, self_p.bottomMargin = nil, nil, nil, nil
         return
     elseif type(value) == "string" then
         local val = tonumber(value:match("^%s*(%d*%.?%d+)%s*%%?%s*$"))
@@ -1413,9 +1417,8 @@ function setters:margin(value)
             error(("Invalid value string (%q): must be a valid number or percentage"):format(value), 2)
         end
     elseif type(value) ~= "number" then
-        error(("Invalid value: number expected, got %s"):(floof.typeOf(value)), 2)
+        error(("Invalid value: number expected, got %s"):format(floof.typeOf(value)), 2)
     end
-    local self_p = priv[self]
     self_p.leftMargin, self_p.topMargin, self_p.rightMargin, self_p.bottomMargin = value, value, value, value
     local l, t, r, b = self_p.w * value - self_p.lm, self_p.h * value - self_p.tm, self_p.w * value - self_p.rm, self_p.h * value - self_p.bm
     if self_p.anchorX == "stretch" then
@@ -1437,6 +1440,7 @@ end
 
 function setters:leftPadding(value)
     validateElement(self, "self", true)
+    local self_p = priv[self]
     if value == nil then
         self_p.leftPadding = nil
         return
@@ -1448,9 +1452,8 @@ function setters:leftPadding(value)
             error(("Invalid value string (%q): must be a valid number or percentage"):format(value), 2)
         end
     elseif type(value) ~= "number" then
-        error(("Invalid value: number expected, got %s"):(floof.typeOf(value)), 2)
+        error(("Invalid value: number expected, got %s"):format(floof.typeOf(value)), 2)
     end
-    local self_p = priv[self]
     self_p.leftPadding = value
     operation(dpx, self, self_p.w * value - self_p.lp, 0)
     flushOperations()
@@ -1458,6 +1461,7 @@ end
 
 function setters:topPadding(value)
     validateElement(self, "self", true)
+    local self_p = priv[self]
     if value == nil then
         self_p.topPadding = nil
         return
@@ -1469,9 +1473,8 @@ function setters:topPadding(value)
             error(("Invalid value string (%q): must be a valid number or percentage"):format(value), 2)
         end
     elseif type(value) ~= "number" then
-        error(("Invalid value: number expected, got %s"):(floof.typeOf(value)), 2)
+        error(("Invalid value: number expected, got %s"):format(floof.typeOf(value)), 2)
     end
-    local self_p = priv[self]
     self_p.topPadding = value
     operation(dpy, self, self_p.h * value - self_p.tp, 0)
     flushOperations()
@@ -1479,6 +1482,7 @@ end
 
 function setters:rightPadding(value)
     validateElement(self, "self", true)
+    local self_p = priv[self]
     if value == nil then
         self_p.rightPadding = nil
         return
@@ -1490,9 +1494,8 @@ function setters:rightPadding(value)
             error(("Invalid value string (%q): must be a valid number or percentage"):format(value), 2)
         end
     elseif type(value) ~= "number" then
-        error(("Invalid value: number expected, got %s"):(floof.typeOf(value)), 2)
+        error(("Invalid value: number expected, got %s"):format(floof.typeOf(value)), 2)
     end
-    local self_p = priv[self]
     self_p.rightPadding = value
     operation(dpx, self, 0, self_p.w * value - self_p.rp)
     flushOperations()
@@ -1500,6 +1503,7 @@ end
 
 function setters:bottomPadding(value)
     validateElement(self, "self", true)
+    local self_p = priv[self]
     if value == nil then
         self_p.bottomPadding = nil
         return
@@ -1511,9 +1515,8 @@ function setters:bottomPadding(value)
             error(("Invalid value string (%q): must be a valid number or percentage"):format(value), 2)
         end
     elseif type(value) ~= "number" then
-        error(("Invalid value: number expected, got %s"):(floof.typeOf(value)), 2)
+        error(("Invalid value: number expected, got %s"):format(floof.typeOf(value)), 2)
     end
-    local self_p = priv[self]
     self_p.bottomPadding = value
     operation(dpy, self, 0, self_p.h * value - self_p.bp)
     flushOperations()
@@ -1521,8 +1524,9 @@ end
 
 function setters:horizontalPadding(value)
     validateElement(self, "self", true)
+    local self_p = priv[self]
     if value == nil then
-        self_p.leftPadding, self_p.rightPadding = nil
+        self_p.leftPadding, self_p.rightPadding = nil, nil
         return
     elseif type(value) == "string" then
         local val = tonumber(value:match("^%s*(%d*%.?%d+)%s*%%?%s*$"))
@@ -1532,9 +1536,8 @@ function setters:horizontalPadding(value)
             error(("Invalid value string (%q): must be a valid number or percentage"):format(value), 2)
         end
     elseif type(value) ~= "number" then
-        error(("Invalid value: number expected, got %s"):(floof.typeOf(value)), 2)
+        error(("Invalid value: number expected, got %s"):format(floof.typeOf(value)), 2)
     end
-    local self_p = priv[self]
     self_p.leftPadding, self_p.rightPadding = value, value
     operation(dpx, self, self_p.w * value - self_p.lp, self_p.w * value - self_p.rp)
     flushOperations()
@@ -1542,8 +1545,9 @@ end
 
 function setters:verticalPadding(value)
     validateElement(self, "self", true)
+    local self_p = priv[self]
     if value == nil then
-        self_p.topPadding, self_p.bottomPadding = nil
+        self_p.topPadding, self_p.bottomPadding = nil, nil
         return
     elseif type(value) == "string" then
         local val = tonumber(value:match("^%s*(%d*%.?%d+)%s*%%?%s*$"))
@@ -1553,9 +1557,8 @@ function setters:verticalPadding(value)
             error(("Invalid value string (%q): must be a valid number or percentage"):format(value), 2)
         end
     elseif type(value) ~= "number" then
-        error(("Invalid value: number expected, got %s"):(floof.typeOf(value)), 2)
+        error(("Invalid value: number expected, got %s"):format(floof.typeOf(value)), 2)
     end
-    local self_p = priv[self]
     self_p.topPadding, self_p.bottomPadding = value, value
     operation(dpy, self, self_p.h * value - self_p.tp, self_p.h * value - self_p.bp)
     flushOperations()
@@ -1563,8 +1566,9 @@ end
 
 function setters:padding(value)
     validateElement(self, "self", true)
+    local self_p = priv[self]
     if value == nil then
-        self_p.leftPadding, self_p.topPadding, self_p.rightPadding, self_p.bottomPadding = nil
+        self_p.leftPadding, self_p.topPadding, self_p.rightPadding, self_p.bottomPadding = nil, nil, nil, nil
         return
     elseif type(value) == "string" then
         local val = tonumber(value:match("^%s*(%d*%.?%d+)%s*%%?%s*$"))
@@ -1574,9 +1578,8 @@ function setters:padding(value)
             error(("Invalid value string (%q): must be a valid number or percentage"):format(value), 2)
         end
     elseif type(value) ~= "number" then
-        error(("Invalid value: number expected, got %s"):(floof.typeOf(value)), 2)
+        error(("Invalid value: number expected, got %s"):format(floof.typeOf(value)), 2)
     end
-    local self_p = priv[self]
     self_p.leftPadding, self_p.topPadding, self_p.rightPadding, self_p.bottomPadding = value, value, value, value
     local l, t, r, b = self_p.w * value - self_p.lp, self_p.h * value - self_p.tp, self_p.w * value - self_p.rp, self_p.h * value - self_p.bp
     operation(dpx, self, l, r)
@@ -1586,6 +1589,7 @@ end
 
 function setters:spacing(value)
     validateElement(self, "self", true)
+    local self_p = priv[self]
     if value == nil then
         self_p.spacing = nil
         return
@@ -1597,9 +1601,8 @@ function setters:spacing(value)
             error(("Invalid value string (%q): must be a valid number or percentage"):format(value), 2)
         end
     elseif type(value) ~= "number" then
-        error(("Invalid value: number expected, got %s"):(floof.typeOf(value)), 2)
+        error(("Invalid value: number expected, got %s"):format(floof.typeOf(value)), 2)
     end
-    local self_p = priv[self]
     self_p.spacing = value
     local b
     if self_p.layoutDirection == "row" then
@@ -1619,7 +1622,7 @@ function setters:alignX(value)
     end
     local previous = self_p.anchorX
     self_p.alignX = value
-    local parent_p = priv[self_p.parent] or Element_p
+    local parent_p = priv[self_p.parentElement] or Element_p
     value = value or (self_p.inLayout and parent_p.layoutDirection == "column" and parent_p.alignChildren) or "center"
     if value == previous or self_p.inLayout and parent_p.layoutDirection == "row" then return end
     self_p.anchorX = value
@@ -1649,7 +1652,7 @@ function setters:alignY(value)
     end
     local previous = self_p.anchorY
     self_p.alignY = value
-    local parent_p = priv[self_p.parent] or Element_p
+    local parent_p = priv[self_p.parentElement] or Element_p
     value = value or (self_p.inLayout and parent_p.layoutDirection == "row" and parent_p.alignChildren) or "middle"
     if value == previous or self_p.inLayout and parent_p.layoutDirection == "column" then return end
     self_p.anchorY = value
@@ -1667,7 +1670,7 @@ function setters:alignY(value)
         d = d + self_p.tm/2 - self_p.bm/2
     end
     operation(dy, self, d)
-    if value == "stretch" then operation(dh, self, room) end
+    if value == "expand" then operation(dh, self, room) end
     flushOperations()
 end
 
@@ -1680,7 +1683,7 @@ function setters:align(value)
             local a, b = value:match("^(.-)%-(.-)$")
             if a and b then
                 if a == "top"  or a == "middle" or a == "bottom" or a == "expand" or
-                   b == "left" or b == "center" or a == "right"  or a == "stretch"
+                   b == "left" or b == "center" or b == "right"  or b == "stretch"
                 then x, y = b, a else x, y = a, b end
             elseif value == "left" or value == "center" or value == "right"  or value == "stretch" then
                 x = value
@@ -1697,11 +1700,11 @@ function setters:align(value)
         error(("Invalid X value (%s), must be one of: left, center, right, stretch"):format(x), 2)
     end
     if y ~= nil and y ~= "top" and y ~= "middle" and y ~= "bottom" and y ~= "expand" then
-        error(("Invalid Y value (%s), must be one of: top, middle, bottom, expand"):format(x), 2)
+        error(("Invalid Y value (%s), must be one of: top, middle, bottom, expand"):format(y), 2)
     end
     local px, py = self_p.anchorX, self_p.anchorY
     self_p.alignX, self_p.alignY = x, y
-    local parent_p = priv[self_p.parent] or Element_p
+    local parent_p = priv[self_p.parentElement] or Element_p
     x = x or (self_p.inLayout and parent_p.layoutDirection == "column" and parent_p.alignChildren) or "center"
     y = y or (self_p.inLayout and parent_p.layoutDirection == "row"    and parent_p.alignChildren) or "middle"
     if x ~= px and (not self_p.inLayout or parent_p.layoutDirection ~= "row") then
@@ -1712,11 +1715,11 @@ function setters:align(value)
         elseif px == "right" then
             d = d - room/2
         end
-        if px == "left" then
+        if x == "left" then
             d = d - room/2
-        elseif px == "right" then
+        elseif x == "right" then
             d = d + room/2
-        elseif px == "stretch" then
+        elseif x == "stretch" then
             d = d + self_p.lm/2 - self_p.rm/2
         end
         operation(dx, self, d)
@@ -1730,11 +1733,11 @@ function setters:align(value)
         elseif py == "bottom" then
             d = d - room/2
         end
-        if py == "top" then
+        if y == "top" then
             d = d - room/2
-        elseif py == "bottom" then
+        elseif y == "bottom" then
             d = d + room/2
-        elseif py == "expand" then
+        elseif y == "expand" then
             d = d + self_p.tm/2 - self_p.bm/2
         end
         operation(dy, self, d)
@@ -2000,7 +2003,7 @@ function setSortOrder(self, priority)
     end
     local self_p = priv[self]
     self_p.sortingPriority = priority
-    local parent_p = priv[parent]
+    local parent_p = priv[self_p.parentElement] or Element_p
     local pos  = parent_p.layoutDirection == "row" and "x"  or "y"
     local size = parent_p.layoutDirection == "row" and "w"  or "h"
     local m1   = parent_p.layoutDirection == "row" and "lm" or "tm"
@@ -2168,7 +2171,7 @@ function moveAfter(self, prv)
     if prv ~= nil then validateElement(prv, "value") end
     if self == prv then error("Invalid value: equal to self", 2) end
     local self_p, prv_p = priv[self], priv[prv]
-    if prv and prv_p.parent ~= self_p.parentElement then
+    if prv and prv_p.parentElement ~= self_p.parentElement then
         error("Invalid value: must be an Element sibling of the object", 2)
     end
     if self_p.previousElement == prv then return end
@@ -2250,8 +2253,8 @@ end
 Element.moveAfter, setters.backward = moveAfter, moveAfter
 
 function setFirstChild(self, first)
-    validateObject(self, "self", true)
-    validateObject(first, "value")
+    validateElement(self, "self", true)
+    validateElement(first, "value")
     local self_p, first_p = priv[self], priv[first]
     if first_p.parentElement ~= self then
         error("Invalid value: must be an Element child of the object", 2)
@@ -2262,8 +2265,8 @@ end
 Element.setFirstChild, setters.firstChildElement = setFirstChild, setFirstChild
 
 function setLastChild(self, last)
-    validateObject(self, "self", true)
-    validateObject(last, "value")
+    validateElement(self, "self", true)
+    validateElement(last, "value")
     local self_p, last_p = priv[self], priv[last]
     if last_p.parentElement ~= self then
         error("Invalid value: must be an Element child of the object", 2)

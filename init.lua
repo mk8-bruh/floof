@@ -101,7 +101,7 @@ end
 
 function methods.supportsArithmetic(v, f)
     if f == "concat" or f ~= "invert" and not operators[f] then return false end
-    local mt = getmetatable(f)
+    local mt = getmetatable(v)
     return type(v) == "number" or
            instances[v] and instances[v].meta[f] or
            type(mt) == "table" and mt["__"..(f == "invert" and metamethods[f] or operators[f])]
@@ -143,7 +143,7 @@ function methods.setter(o, name, func)
         error("Object is not a class or instance", 2)
     end
     if type(name) ~= "string" then
-        error(("Property name must be a string (got %s)"):format(tostring(name), type(name)), 2)
+        error(("Property name must be a string (got %s)"):format(type(name)), 2)
     end
     if not name:match("^[%a][_%w]*$") then
         error(("Invalid property name: %q (must start with a letter and contain only letters, numbers and underscores)"):format(name), 2)
@@ -174,7 +174,7 @@ function methods.property(o, name, getter, setter)
         error("Object is not a class or instance", 2)
     end
     if type(name) ~= "string" then
-        error(("Property name must be a string (got %s)"):format(tostring(name), type(name)), 2)
+        error(("Property name must be a string (got %s)"):format(type(name)), 2)
     end
     if not name:match("^[%a][_%w]*$") then
         error(("Invalid property name: %q (must start with a letter and contain only letters, numbers and underscores)"):format(name), 2)
@@ -185,11 +185,11 @@ function methods.property(o, name, getter, setter)
     if type(setter) ~= "function" and setter ~= nil then
         error(("Property setter must be a function (got: %s)"):format(type(setter)), 2)
     end
-    if o:isClass() then
-        for _, i in ipairs(o:instances()) do
+    if methods.isClass(o) then
+        for i in methods.instancesOf(o) do
             rawset(i, name, nil)
         end
-    elseif o:isInstance() then
+    elseif methods.isInstance(o) then
         rawset(o, name, nil)
     end
     local ref = instances[o] or classes[o]
@@ -320,7 +320,7 @@ function methods.set(...)
         if ref.setters[k] then
             return methods.safeReturn(ref.setters[k], o, v)
         elseif ref.getters[k] then
-            error(("Cannot assign value to property %q of %s as it is read-only"):format(k, tostring(c)), 2)
+            error(("Cannot assign value to property %q of %s as it is read-only"):format(k, tostring(o)), 2)
         elseif ref.meta.set then
             return methods.safeReturn(ref.meta.set, o, k, v)
         end
@@ -471,19 +471,19 @@ function methods.newIterator(factory)
 end
 
 function methods.instances()
-    return methods.iterate(factory(instances), function(self) return factory(instances, self) end)
+    return methods.iterate((next(instances)), function(self) return (next(instances, self)) end)
 end
 
 function methods.instancesOf(cls)
-    return methods.iterate(factory(instances), function(self)
-        repeat self = factory(instances, self) until not self or methods.instanceOf(self, cls)
+    return methods.iterate((next(instances)), function(self)
+        repeat self = (next(instances, self)) until not self or methods.instanceOf(self, cls)
         return self
     end)
 end
 
 function methods.directInstancesOf(cls)
-    return methods.iterate(factory(instances), function(self)
-        repeat self = factory(instances, self) until not self or instances[self].class == cls
+    return methods.iterate((next(instances)), function(self)
+        repeat self = (next(instances, self)) until not self or instances[self].class == cls
         return self
     end)
 end
