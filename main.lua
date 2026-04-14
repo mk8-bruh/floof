@@ -87,6 +87,43 @@ inputListener = Object{
     end
 }
 
+profiler = Element{
+    inLayout = false,
+    z = math.huge,
+    align = "bottom-right",
+    width = "30%", height = "30%",
+    baseColor = {0.5, 0.5, 0.5},
+    segments = 30,
+    portions = {
+        {size = 0, color = {1, 1, 0}},
+        {size = 0, color = {0.2, 0.5, 1}},
+        {size = 0, color = {1, 0.5, 0.2}},
+    },
+    check = function(self, x, y)
+        return (x - self.x)^2 + (y - self.y)^2 <= math.min(self.w/2, self.h/2)^2
+    end,
+    update = function(self, dt)
+        if Object.profiler.timelines.entries > 0 then
+            local t = Object.profiler.sums.total
+            self.portions[1].size = Object.profiler.sums.events / t
+            self.portions[2].size = Object.profiler.sums.update / t
+            self.portions[3].size = Object.profiler.sums.render / t
+        end
+    end,
+    draw = function(self)
+        local r = math.min(self.w/2, self.h/2)
+        love.graphics.setColor(self.baseColor)
+        love.graphics.circle("fill", self.x, self.y, r, self.segments)
+        local a = -math.pi/2
+        for i, portion in ipairs(self.portions) do
+            love.graphics.setColor(portion.color)
+            local d = 2 * math.pi * portion.size
+            love.graphics.arc("fill", self.x, self.y, r, a, a + d, math.max(self.segments * portion.size, 1))
+            a = a + d
+        end
+    end
+}
+
 fpsCounter = Element{
     inLayout = false,
     z = math.huge,

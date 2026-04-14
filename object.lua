@@ -237,6 +237,67 @@ function removeHandler(...)
 end
 Object.removeHandler = removeHandler
 
+-- profiling
+
+local profiling_data = {
+    events = array(), update = array(), render = array(), total = array(),
+    timelines = {
+        entries = 0, maxEntries = 300
+    },
+    sums = {
+        events = 0, update = 0, render = 0, total = 0
+    }
+}
+profiling_data.timelines.events = profiling_data.events:Proxy()
+profiling_data.timelines.update = profiling_data.update:Proxy()
+profiling_data.timelines.render = profiling_data.render:Proxy()
+profiling_data.timelines.total = profiling_data.total:Proxy()
+local function profileEntry(...)
+    local e, u, r = 0, 0, 0
+    if ... then
+        e, u, r = ...
+        profiling_data.events:append(e)
+        profiling_data.update:append(u)
+        profiling_data.render:append(r)
+        profiling_data.total:append(e + u + r)
+        profiling_data.timelines.entries = profiling_data.timelines.entries + 1
+    elseif profiling_data.timelines.entries > 0 then
+        e = -profiling_data.events:pop(1)
+        u = -profiling_data.update:pop(1)
+        r = -profiling_data.render:pop(1)
+        profiling_data.total:pop(1)
+        profiling_data.timelines.entries = profiling_data.timelines.entries - 1
+    end
+    profiling_data.sums.events = profiling_data.sums.events + e
+    profiling_data.sums.update = profiling_data.sums.update + u
+    profiling_data.sums.render = profiling_data.sums.render + r
+    profiling_data.sums.total = profiling_data.sums.total + e + u + r
+end
+local profiler = setmetatable({}, {
+    __index = {
+        sums = setmetatable({}, {
+            __index = profiling_data.sums,
+            __newindex = function(t, k, v) end,
+            __metatable = {}
+        }),
+        timelines = setmetatable({}, {
+            __index = profiling_data.timelines,
+            __newindex = function(t, k, v)
+                if k == "maxEntries" and type(v) == "number" then
+                    v = math.max(0, math.floor(v + 0.5))
+                    profiling_data.timelines.maxEntries = v
+                    while profiling_data.timelines.entries > v do
+                        profileEntry()
+                    end
+                end
+            end,
+            __metatable = {}
+        })
+    },
+    __newindex = function(t, k, v) end,
+    __metatable = {}
+})
+
 -- public interface
 
 function Object:__init(data, ...)
@@ -309,6 +370,7 @@ local getters = {
     firstListener = priv, lastListener = priv
 }
 function Object:__get(k)
+    if self == Object and k == "profiler" then return profiler end
     if priv[self] and getters[k] then
         if getters[k] == priv then
             return priv[self][k]
@@ -487,6 +549,7 @@ function Object.initialize(arg)
         local dt = 0
         return function()
             -- events
+            local events_t = love.timer.getTime()
             if love.event then
                 love.event.pump()
                 repeat
@@ -494,7 +557,9 @@ function Object.initialize(arg)
                     if s == false then return r end
                 until s
             end
+            events_t = (love.timer.getTime() - events_t) * 1000
             -- update
+            local update_t = love.timer.getTime()
             if love.timer then dt = love.timer.step() end
             for obj in hierarchyForwards(Object) do
                 local obj_p = priv[obj]
@@ -505,18 +570,27 @@ function Object.initialize(arg)
             end
             invokeHandlers("update", dt)
             floof.safeInvoke(love.update, dt)
+            update_t = (love.timer.getTime() - update_t) * 1000
             -- draw
+            local render_t = love.timer.getTime()
             if love.graphics and love.graphics.isActive() then
                 love.graphics.origin()
                 love.graphics.clear(love.graphics.getBackgroundColor())
                 floof.safeInvoke(render, Object)
                 love.graphics.present()
             end
+            render_t = (love.timer.getTime() - render_t) * 1000
             -- timer
             if love.timer then love.timer.sleep(0.001) end
+            profileEntry(events_t, update_t, render_t)
+            while profiling_data.timelines.entries > profiling_data.timelines.maxEntries do
+                profileEntry()
+            end
         end
     end
 end
+
+
 
 -- hierarchy
 
