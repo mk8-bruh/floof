@@ -55,7 +55,7 @@ local function initPrivInstance(self)
         l  = 0, t  = 0, r  = 0, b  = 0,
         lm = 0, tm = 0, rm = 0, bm = 0,
         lp = 0, tp = 0, rp = 0, bp = 0,
-        width = nil, height = nil, aspectRatio = nil,
+        width = nil, height = nil,
         alignX = nil, alignY = nil, anchorX = "center", anchorY = "center",
         leftMargin  = nil, topMargin  = nil, rightMargin  = nil, bottomMargin  = nil,
         leftPadding = nil, topPadding = nil, rightPadding = nil, bottomPadding = nil,
@@ -105,7 +105,7 @@ local getters = {
     l  = priv, t  = priv, r  = priv, b  = priv,
     lm = priv, tm = priv, rm = priv, bm = priv,
     lp = priv, tp = priv, rp = priv, bp = priv,
-    width = priv, height = priv, aspectRatio = priv,
+    width = priv, height = priv,
     alignX = priv, alignY = priv, --anchorX = priv, anchorY = priv,
     leftMargin  = priv, topMargin  = priv, rightMargin  = priv, bottomMargin  = priv,
     leftPadding = priv, topPadding = priv, rightPadding = priv, bottomPadding = priv,
@@ -281,10 +281,6 @@ function dw(self, d)
     self_p.w = self_p.w + d
     self_p.l = self_p.l - d/2
     self_p.r = self_p.r + d/2
-    -- size
-    if self_p.aspectRatio then
-        operation(dh, self, d / self_p.aspectRatio)
-    end
     -- padding
     if self_p.leftPadding or self_p.rightPadding then
         operation(dpx, self,
@@ -377,10 +373,6 @@ function dh(self, d)
     self_p.h = self_p.h + d
     self_p.t = self_p.t - d/2
     self_p.b = self_p.b + d/2
-    -- size
-    if self_p.aspectRatio then
-        operation(dw, self, d * self_p.aspectRatio)
-    end
     -- padding
     if self_p.topPadding or self_p.bottomPadding then
         operation(dpy, self,
@@ -1342,7 +1334,6 @@ function setters:width(value)
     local self_p = priv[self]
     if value == nil then
         self_p.width = nil
-        -- if possible and necessary, adjust dimensions to match aspect ratio
         return
     elseif type(value) == "string" then
         local val = tonumber(value:match("^%s*(%d*%.?%d+)%s*%%?%s*$"))
@@ -1365,7 +1356,6 @@ function setters:height(value)
     local self_p = priv[self]
     if value == nil then
         self_p.height = nil
-        -- if possible and necessary, adjust dimensions to match aspect ratio
         return
     elseif type(value) == "string" then
         local val = tonumber(value:match("^%s*(%d*%.?%d+)%s*%%?%s*$"))
@@ -1381,18 +1371,6 @@ function setters:height(value)
     elseif type(value) ~= "number" then
         error(("Invalid value: number or string expected, got %s"):format(floof.typeOf(value)), 2)
     end
-end
-
-function setters:aspectRatio(value)
-    validateElements(self, "self", false)
-    local self_p = priv[self]
-    if value == nil then
-        self_p.aspectRatio = nil
-    elseif type(value) ~= "number" then
-        error(("Invalid value: number expected, got %s"):format(floof.typeOf(value)), 2)
-    end
-    self_p.aspectRatio = value
-    -- if possible and necessary, adjust dimensions to match aspect ratio
 end
 
 function setters:leftMargin(value)
