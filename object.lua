@@ -1182,7 +1182,7 @@ function shapeChanged(self, ...)
     end
     for i, press in self_p.presses:iterate() do
         local x, y = getPressPosition(self, press)
-        if handleCallback(self, "dragged", press, x, y, 0, 0, ...) ~= true and not handleCallback(self, "check", x, y) then
+        if handleCallback(self, "dragged", x, y, 0, 0, press, ...) ~= true and not handleCallback(self, "check", x, y) then
             floof.safeInvoke(stopPress, self, press, x, y, false, ...)
         end
     end
@@ -1265,8 +1265,8 @@ function movePress(self, press, x, y, dx, dy, ...)
     self = parent_p.pressTargets[press]
     local self_p = priv[self]
     repeat
-        invokeHandlers(self, "dragged", press, x, y, dx, dy, not pointer, ...)
-        if handleCallback(self, "dragged", press, x, y, dx, dy, not pointer, ...) ~= true
+        invokeHandlers(self, "dragged", x, y, dx, dy, press, not pointer, ...)
+        if handleCallback(self, "dragged", x, y, dx, dy, press, not pointer, ...) ~= true
            and not handleCallback(self, "check", x, y)
         then
             parent_p.pressTargets[press] = nil
