@@ -118,10 +118,13 @@ local getters = {
 function Element:__get(k)
     if priv[self] then
         if type(k) == "number" then
-            if k < 0 then k = k + priv[self].layoutCount + 1 end
+            if k <= 0 then
+                k = math.ceil(k - 0.5) + priv[self].layoutCount + 1
+            else k = math.floor(k + 0.5) end
             for elem in iterateElementChildren(self) do
                 if priv[elem].layoutIndex == k then return elem end
             end
+            return
         elseif getters[k] then
             if getters[k] == priv then
                 return priv[self][k]

@@ -546,8 +546,8 @@ function Array:__get(k)
     if floof.instanceOf(self, Array) then
         if type(k) == "number" and k == math.floor(k) then
             if k <= 0 then
-                k = len(self) + k + 1
-            end
+                k = len(self) + math.ceil(k - 0.5) + 1
+            else k = math.floor(k + 0.5) end
             return proxySrc[self] and rawget(proxySrc[self], k) or rawget(self, k)
         end
     end
