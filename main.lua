@@ -15,6 +15,11 @@ function Box:unhovered()
 end
 
 function Box:draw()
+    if self.isPressed then
+        love.graphics.setColor(1, 0.85, 0)
+    elseif self.isHovered then
+        love.graphics.setColor(1, 1, 0.65)
+    end
     love.graphics.rectangle("line", self.l, self.t, self.w, self.h)
     love.graphics.setFont(self.font)
     local label = tostring(self.layoutIndex)
