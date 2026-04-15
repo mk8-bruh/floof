@@ -1265,8 +1265,8 @@ function movePress(self, press, x, y, dx, dy, ...)
     self = parent_p.pressTargets[press]
     local self_p = priv[self]
     repeat
-        invokeHandlers(self, "dragged", x, y, dx, dy, press, not pointer, ...)
-        if handleCallback(self, "dragged", x, y, dx, dy, press, not pointer, ...) ~= true
+        invokeHandlers(self, "dragged", press, x, y, dx, dy, not pointer, ...)
+        if handleCallback(self, "dragged", press, x, y, dx, dy, not pointer, ...) ~= true
            and not handleCallback(self, "check", x, y)
         then
             parent_p.pressTargets[press] = nil

@@ -2433,7 +2433,7 @@ function moveAfter(self, prv)
         handleCallback(self, "reordered")
     end
 end
-Element.moveAfter, setters.backward = moveAfter, moveAfter
+Element.moveAfter, setters.previousElement = moveAfter, moveAfter
 
 function setFirstChild(self, first)
     validateElement(self, "self", true)
