@@ -790,16 +790,24 @@ local function addToLayout(self)
             end
         end
     end
-    parent_p.layoutCount = parent_p.layoutCount + 1
     local dr
     if parent_p.layoutDirection == "row" then
-        dr = -self_p.lm - self_p.w - self_p.rm
+        dr = -self_p.lm - self_p.w - self_p.rm - (
+            (parent_p.layoutCount > 0 or parent_p.spaceAround)
+            and parent_p.space
+            or 0
+        )
     elseif parent_p.layoutDirection == "column" then
-        dr = -self_p.tm - self_p.h - self_p.bm
+        dr = -self_p.tm - self_p.h - self_p.bm - (
+            (parent_p.layoutCount > 0 or parent_p.spaceAround)
+            and parent_p.space
+            or 0
+        )
     end
+    parent_p.layoutCount = parent_p.layoutCount + 1
     local ns = parent_p.layoutCount + (parent_p.spaceAround and 1 or -1)
     if ns > 0 then
-        operation(ds, self_p.parentElement or Element, math.max(parent_p.extraRoom, 0) / ns - parent_p.totalSpace + parent_p.space, true)
+        operation(ds, self_p.parentElement or Element, math.max(parent_p.extraRoom, 0) / ns - (parent_p.totalSpace - parent_p.space), true)
     end
     operation(droom, self_p.parentElement or Element, dr)
 end
@@ -853,13 +861,21 @@ local function removeFromLayout(self)
     end
     local dr
     if parent_p.layoutDirection == "row" then
-        dr = self_p.lm + self_p.w + self_p.rm
+        dr = self_p.lm + self_p.w + self_p.rm + (
+            (parent_p.layoutCount > 0 or parent_p.spaceAround)
+            and parent_p.space
+            or 0
+        )
     elseif parent_p.layoutDirection == "column" then
-        dr = self_p.tm + self_p.h + self_p.bm
+        dr = self_p.tm + self_p.h + self_p.bm + (
+            (parent_p.layoutCount > 0 or parent_p.spaceAround)
+            and parent_p.space
+            or 0
+        )
     end
     local ns = parent_p.layoutCount + (parent_p.spaceAround and 1 or -1)
     if ns > 0 then
-        operation(ds, self_p.parentElement or Element, math.max(parent_p.extraRoom, 0) / ns - parent_p.totalSpace + parent_p.space, true)
+        operation(ds, self_p.parentElement or Element, math.max(parent_p.extraRoom, 0) / ns - (parent_p.totalSpace - parent_p.space), true)
     end
     operation(droom, self_p.parentElement or Element, dr)
 end
@@ -1906,7 +1922,9 @@ function setters:layoutDirection(value)
     if self_p.layoutDirection == value then return end
     self_p.layoutDirection = value
     if value == "row" then
-        local room = self_p.w - self_p.lp - self_p.rp
+        local room = self_p.w - self_p.lp - self_p.rp - (
+            self_p.layoutCount + (self_p.spaceAround and 1 or -1)
+        ) * self_p.space
         if self_p.justifyChildren == "top" then
             self_p.justifyChildren = "left"
         elseif self_p.justifyChildren == "middle" then
@@ -1932,7 +1950,9 @@ function setters:layoutDirection(value)
         end
         operation(droom, self, room - self_p.extraRoom)
     elseif value == "column" then
-        local room = self_p.h - self_p.tp - self_p.bp
+        local room = self_p.h - self_p.tp - self_p.bp - (
+            self_p.layoutCount + (self_p.spaceAround and 1 or -1)
+        ) * self_p.space
         if self_p.justifyChildren == "left" then
             self_p.justifyChildren = "top"
         elseif self_p.justifyChildren == "center" then
@@ -2087,9 +2107,13 @@ function setters:spaceAround(value)
                 end
             end
         end
-        operation(droom, self, 2 * -sign * self_p.totalSpace)
+        local ns = parent_p.layoutCount + (value and 1 or -1)
+        if ns > 0 then
+            operation(ds, self, math.max(self_p.extraRoom, 0) / ns - (self_p.totalSpace - self_p.space), true)
+        end
+        operation(droom, self, 2 * -sign * self_p.space)
     else
-        self_p.totalSpace = self_p.totalSpace + (value and 1 or -1) * self_p.extraRoom
+        operation(droom, self, (value and -1 or 1) * self_p.space)
     end
     flushOperations()
 end
@@ -2111,6 +2135,8 @@ function setters:expandSpace(value)
             local d = self_p.space - self_p.totalSpace
             if d < 0 then operation(ds, self, d, true) end
         end
+    else
+        self_p.totalSpace = self_p.totalSpace + (value and 1 or -1) * self_p.extraRoom
     end
     flushOperations()
 end

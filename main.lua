@@ -6,58 +6,12 @@ Box = Element:class("Box")
 
 Box.font = love.graphics.newFont(12)
 
-function Box:constructed()
-    self.baseW, self.pressedW, self.hoveredW = self.w, self.w + 10, self.w + 5
-    self.baseH, self.pressedH, self.hoveredH = self.h, self.h + 10, self.h + 5
-end
-
-function Box:__set_w(value)
-    self.baseW, self.pressedW, self.hoveredW = value, value + 10, value + 5
-    Element:set(self, "w", self.isPressed and self.pressedW or self.isHovered and self.hoveredW or self.baseW)
-end
-
-function Box:__set_h(value)
-    self.baseH, self.pressedH, self.hoveredH = value, value + 10, value + 5
-    Element:set(self, "h", self.isPressed and self.pressedH or self.isHovered and self.hoveredH or self.baseH)
-end
-
 function Box:hovered()
-    if not self.isPressed then
-        Element:set(self, "w", self.hoveredW)
-        Element:set(self, "h", self.hoveredH)
-    end
+    self.w, self.h = self.w + 5, self.h + 5
 end
 
 function Box:unhovered()
-    if not self.isPressed then
-        Element:set(self, "w", self.baseW)
-        Element:set(self, "h", self.baseH)
-    end
-end
-
-function Box:pressed()
-    Element:set(self, "w", self.pressedW)
-    Element:set(self, "h", self.pressedH)
-end
-
-function Box:released()
-    if self.isHovered then
-        Element:set(self, "w", self.hoveredW)
-        Element:set(self, "h", self.hoveredH)
-    else
-        Element:set(self, "w", self.baseW)
-        Element:set(self, "h", self.baseH)
-    end
-end
-
-function Box:cancelled()
-    if self.isHovered then
-        Element:set(self, "w", self.hoveredW)
-        Element:set(self, "h", self.hoveredH)
-    else
-        Element:set(self, "w", self.baseW)
-        Element:set(self, "h", self.baseH)
-    end
+    self.w, self.h = self.w - 5, self.h - 5
 end
 
 function Box:draw()
@@ -67,6 +21,7 @@ function Box:draw()
     love.graphics.print(label, self.x - self.font:getWidth(label)/2, self.y - self.font:getHeight()/2)
 end
 
+Element.space = 10
 Element.expandSpace = true
 Element.spaceAround = true
 
