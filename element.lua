@@ -2201,12 +2201,12 @@ function setSortOrder(self, priority)
             if sib_p.nextElement then
                 priv[sib_p.nextElement].previousElement = self
             else
-                parent_p.frontmost = self
+                parent_p.lastChildElement = self
             end
             if self_p.previousElement then
                 priv[self_p.previousElement].nextElement = sib
             else
-                parent_p.backmost = sib
+                parent_p.firstChildElement = sib
             end
             sib_p.nextElement, self_p.previousElement = self, sib
             before[sib][self], before[self][sib] = true
@@ -2231,12 +2231,12 @@ function setSortOrder(self, priority)
             if self_p.nextElement then
                 priv[self_p.nextElement].previousElement = sib
             else
-                parent_p.frontmost = sib
+                parent_p.lastChildElement = sib
             end
             if sib_p.previousElement then
                 priv[sib_p.previousElement].nextElement = self
             else
-                parent_p.backmost = self
+                parent_p.firstChildElement = self
             end
             self_p.nextElement, sib_p.previousElement = sib, self
             before[self][sib], before[sib][self] = true
@@ -2287,12 +2287,12 @@ function moveBefore(self, nxt)
             if sib_p.nextElement then
                 priv[sib_p.nextElement].previousElement = self
             else
-                parent_p.frontmost = self
+                parent_p.lastChildElement = self
             end
             if self_p.previousElement then
                 priv[self_p.previousElement].nextElement = sib
             else
-                parent_p.backmost = sib
+                parent_p.firstChildElement = sib
             end
             sib_p.nextElement, self_p.previousElement = self, sib
             before[sib][self], before[self][sib] = true
@@ -2316,12 +2316,12 @@ function moveBefore(self, nxt)
             if self_p.nextElement then
                 priv[self_p.nextElement].previousElement = sib
             else
-                parent_p.frontmost = sib
+                parent_p.lastChildElement = sib
             end
             if sib_p.previousElement then
                 priv[sib_p.previousElement].nextElement = self
             else
-                parent_p.backmost = self
+                parent_p.firstChildElement = self
             end
             self_p.nextElement, sib_p.previousElement = sib, self
             before[self][sib], before[sib][self] = true
@@ -2372,12 +2372,12 @@ function moveAfter(self, prv)
             if sib_p.nextElement then
                 priv[sib_p.nextElement].previousElement = self
             else
-                parent_p.frontmost = self
+                parent_p.lastChildElement = self
             end
             if self_p.previousElement then
                 priv[self_p.previousElement].nextElement = sib
             else
-                parent_p.backmost = sib
+                parent_p.firstChildElement = sib
             end
             sib_p.nextElement, self_p.previousElement = self, sib
             before[sib][self], before[self][sib] = true
@@ -2403,12 +2403,12 @@ function moveAfter(self, prv)
             if self_p.nextElement then
                 priv[self_p.nextElement].previousElement = sib
             else
-                parent_p.frontmost = sib
+                parent_p.lastChildElement = sib
             end
             if sib_p.previousElement then
                 priv[sib_p.previousElement].nextElement = self
             else
-                parent_p.backmost = self
+                parent_p.firstChildElement = self
             end
             self_p.nextElement, sib_p.previousElement = sib, self
             before[self][sib], before[sib][self] = true
