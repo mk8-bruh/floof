@@ -8,7 +8,14 @@ A Lua framework providing a class system with single inheritance, properties (ge
 
 [Clone this repo](https://github.com/git-guides/git-clone) or download the files into a `/floof/` folder inside your project, then require it in your scripts.
 
-To clone `FLOOF` as a submodule, first [initialize Git](https://github.com/git-guides/git-init) in your project, then run `git submodule add https://github.com/mk8-bruh/floof [[PATH]]` from your project's root directory. Doing this allows you to easily update the library by running `git submodule update`.
+To clone `FLOOF` as a submodule, first [initialize Git](https://github.com/git-guides/git-init) in your project, then run
+```
+git submodule add https://github.com/mk8-bruh/floof [[PATH]]
+```
+from your project's root directory. Doing this allows you to easily update the library by running
+```
+git submodule update
+```
 
 If you've never used Git before, you can check out these pages:
 - [install Git](https://github.com/git-guides/install-git)
