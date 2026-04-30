@@ -46,7 +46,8 @@ function methods.getInstance(id)
 end
 
 function methods.instanceOf(object, class)
-    local currentClass = refs[object] and refs[object].class
+    if not refs[object] or refs[object].type ~= "instance" then return refs[class] == nil end
+    local currentClass = refs[object].class
     if not currentClass and class == module then return true end
     while currentClass do
         if currentClass == class then return true end
@@ -56,6 +57,8 @@ function methods.instanceOf(object, class)
 end
 
 function methods.subclassOf(class, super)
+    if not refs[class] or refs[class].type ~= "class" then return refs[super] == nil end
+    if super == module then return true end
     local currentClass = refs[class] and refs[class].super
     while currentClass do
         if currentClass == super then return true end
@@ -503,6 +506,8 @@ local submodules = {
     object  = false,
     element = false
 }
+
+refs[module] = {}
 
 return setmetatable(module, {
     __index = function(t, k)

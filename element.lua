@@ -1296,8 +1296,8 @@ function setters:space(value)
         error(("Invalid value: number expected, got %s"):format(floof.typeOf(value)), 2)
     end
     local self_p = priv[self]
-    if self_p.leftPadding or self_p.topPadding or self_p.rightPadding or self_p.bottomPadding then
-        error("Cannot modify the raw padding of an Element with dynamic padding", 2)
+    if self_p.spacing then
+        error("Cannot modify the raw space of an Element with dynamic spacing", 2)
     else
         operation(ds, self, value - self_p.space)
         flushOperations()
