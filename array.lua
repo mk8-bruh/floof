@@ -221,21 +221,22 @@ function Array:copy()
 end
 
 function Array:slice(start, stop, step)
-    if start == nil then
-        return Array()
+    if type(start) == "number" and stop == nil and step == nil then
+        start, stop, step = 1, start, 1
     end
-    if stop == nil then
-        stop = start
-        start = 1
+    if type(start) == "number" and type(stop) == "number" and step == nil then
+        step = stop < start and -1 or 1
     end
-    if step == nil then
-        step = 1
+    if type(start) ~= "number" then
+        error(("Invalid start: number expected, got %s"):format(floof.typeOf(start)), 2)
     end
-    if type(start) ~= "number" or type(stop) ~= "number" or type(step) ~= "number" then
-        error(("Start, stop, and step must be numbers (got: %s, %s, %s)"):format(type(start), type(stop), type(step)), 2)
+    if type(stop) ~= "number" then
+        error(("Invalid stop: number expected, got %s"):format(floof.typeOf(stop)), 2)
     end
-    if step == 0 then
-        error("Step cannot be 0", 2)
+    if type(step) ~= "number" then
+        error(("Invalid step: number expected, got %s"):format(floof.typeOf(step)), 2)
+    elseif step == 0 then
+        error("Step must be non-zero", 2)
     end
     local result = Array()
     for i = start, stop, step do
@@ -272,7 +273,7 @@ function Array:min(func)
     if not floof.instanceOf(self, Array) then
         error(("Invalid caller: Array expected, got %s"):format(floof.typeOf(self)), 2)
     end
-    if not floof.isCallable(func) then
+    if func ~= nil and not floof.isCallable(func) then
         error(("Invalid comparator: callable expected, got %s"):format(floof.typeOf(func)), 2)
     end
     local min
@@ -291,7 +292,7 @@ function Array:max(func)
     if not floof.instanceOf(self, Array) then
         error(("Invalid caller: Array expected, got %s"):format(floof.typeOf(self)), 2)
     end
-    if not floof.isCallable(func) then
+    if func ~= nil and not floof.isCallable(func) then
         error(("Invalid comparator: callable expected, got %s"):format(floof.typeOf(func)), 2)
     end
     local max
