@@ -117,11 +117,12 @@ function Array:push(v, i)
     elseif i ~= math.floor(i) then
         error(("Invalid index (%s): integer expected"):format(tostring(i)), 2)
     end
+    local k = length[self] + 1
     if i <= 0 then
-        i = length[self] + i + 1
+        i = k + i
     end
-    i = math.max(1, math.min(i, length[self] + 1))
-    length[self] = length[self] + 1
+    i = math.max(1, math.min(i, k))
+    length[self] = k
     table.insert(self, i, v)
     return self
 end
@@ -148,8 +149,9 @@ function Array:append(v)
     if not length[self] then
         error(("Invalid caller: mutable Array expected, got %s"):format(floof.typeOf(self)), 2)
     end
-    length[self] = length[self] + 1
-    table.insert(self, v)
+    local k = length[self] + 1
+    rawset(self, k, v)
+    length[self] = k
     return self
 end
 
@@ -221,11 +223,11 @@ function Array:copy()
 end
 
 function Array:slice(start, stop, step)
-    if type(start) == "number" and stop == nil and step == nil then
-        start, stop, step = 1, start, 1
+    if not floof.instanceOf(self, Array) then
+        error(("Invalid caller: Array expected, got %s"):format(floof.typeOf(self)), 2)
     end
-    if type(start) == "number" and type(stop) == "number" and step == nil then
-        step = stop < start and -1 or 1
+    if type(start) == "number" and stop == nil then
+        start, stop = 1, start
     end
     if type(start) ~= "number" then
         error(("Invalid start: number expected, got %s"):format(floof.typeOf(start)), 2)
@@ -233,7 +235,11 @@ function Array:slice(start, stop, step)
     if type(stop) ~= "number" then
         error(("Invalid stop: number expected, got %s"):format(floof.typeOf(stop)), 2)
     end
-    if type(step) ~= "number" then
+    if start <= 0 then start = len(self) + start + 1 end
+    if stop  <= 0 then stop  = len(self) + stop  + 1 end
+    if step == nil then
+        step = stop < start and -1 or 1
+    elseif type(step) ~= "number" then
         error(("Invalid step: number expected, got %s"):format(floof.typeOf(step)), 2)
     elseif step == 0 then
         error("Step must be non-zero", 2)
@@ -545,7 +551,7 @@ end
 
 function Array:__get(k)
     if floof.instanceOf(self, Array) then
-        if type(k) == "number" and k == math.floor(k) then
+        if type(k) == "number" then
             if k <= 0 then
                 k = len(self) + math.ceil(k - 0.5) + 1
             else k = math.floor(k + 0.5) end
@@ -556,11 +562,11 @@ end
 
 function Array:__set(k, v)
     if floof.instanceOf(self, Array) then
-        if type(k) == "number" and k == math.floor(k) then
+        if type(k) == "number" then
             if proxySrc[self] then error(("%s is immutable"):format(floof.typeOf(self)), 2) end
             if k <= 0 then
-                k = length[self] + k + 1
-            end
+                k = len(self) + math.ceil(k - 0.5) + 1
+            else k = math.floor(k + 0.5) end
             if k <= 0 or k > length[self] then error(("Invalid index (%d): out of range"):format(k), 2) end
         end
     end
