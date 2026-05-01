@@ -46,3 +46,31 @@ Box{ width = "10%", height = "10%" }
 
 Object.initialize(arg)
 ```
+
+## Documentation
+
+The full reference docs live in the [GithHub wiki](https://github.com/mk8-bruh/floof/wiki).
+
+## Learning resources
+
+floof assumes some familiarity with Lua, LÖVE, and basic object-oriented programming. If any of those are new to you, here are good places to start:
+
+### Lua
+
+- [Programming in Lua](https://www.lua.org/pil/contents.html)
+- [Lua 5.1 Reference Manual](https://www.lua.org/manual/5.1/)
+- [learnxinyminutes.com — Lua](https://learnxinyminutes.com/lua/) 
+
+### LÖVE
+
+- [Official LÖVE wiki](https://love2d.org/wiki/Main_Page)
+- [Sheepolution's *How to LÖVE*](https://sheepolution.com/learn/book/contents) *(this is where I started with Lua and LÖVE)*
+- [awesome-love2d](https://github.com/love2d-community/awesome-love2d)
+
+### Object-oriented programming
+
+- [Wikipedia — Object-oriented programming](https://en.wikipedia.org/wiki/Object-oriented_programming)
+- [educative.io blog — OOP explained](https://www.educative.io/blog/object-oriented-programming)
+- [Programming in Lua, Chapter 16](https://www.lua.org/pil/16.html) *(this is what floof actually does under the hood)*
+
+> These are my personal picks, there are many other great resources out there if you search up the keywords :D
