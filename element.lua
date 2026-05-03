@@ -1,7 +1,7 @@
 -- FLOOF: Fast Lua Element-Oriented Framework
 -- Copyright (c) 2026 Matus Kordos
 
-local PATH = (...):match("^(.*%.).-$") or ""
+local PATH = (...):match("^(.*)%.element$") or "."
 local floof = require(PATH)
 local array, vec, Object = floof.array, floof.vector, floof.object
 

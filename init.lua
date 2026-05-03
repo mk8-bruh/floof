@@ -1,6 +1,8 @@
 -- FLOOF: Fast Lua Object-Oriented Framework
 -- Copyright (c) 2026 Matus Kordos
 
+if __floof_cache then return __floof_cache end
+
 local methods, module = {}, {}
 local named = setmetatable({}, {__mode = "v"})
 local ids   = setmetatable({}, {__mode = "v"})
@@ -499,25 +501,25 @@ function methods.directInstancesOf(cls)
     return methods.iterate(nextDirect(nil), nextDirect)
 end
 
-local PATH = ...
-local submodules = {
-    array   = false,
-    vector  = false,
-    object  = false,
-    element = false
-}
+local PATH = (... == "." and "%s") or (... .. ".%s")
+local submodules = {}
 
 refs[module] = {}
 
+__floof_cache = module
 return setmetatable(module, {
     __index = function(t, k)
-        if submodules[k] then
-            return submodules[k]
-        elseif submodules[k] == false then
-            submodules[k] = require(PATH .. k)
+        if methods[k] then
+            return methods[k]
+        elseif named[k] then
+            return named[k]
+        elseif submodules[k] then
             return submodules[k]
         else
-            return methods[k] or named[k]
+            print(PATH:format(k))
+            local sm = require(PATH:format(k))
+            submodules[k] = sm
+            return sm
         end
     end,
     __newindex = function() end,

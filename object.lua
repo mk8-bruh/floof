@@ -7,7 +7,7 @@ local STORE_HANDLER_SOURCE = true
 -- FLOOF: Fast Lua Object-Oriented Framework
 -- Copyright (c) 2026 Matus Kordos
 
-local PATH = (...):match("^(.*%.).-$") or ""
+local PATH = (...):match("^(.*)%.object$") or "."
 local floof = require(PATH)
 local array, vec = floof.array, floof.vector
 

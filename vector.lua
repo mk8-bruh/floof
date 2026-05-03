@@ -1,7 +1,7 @@
 -- FLOOF: Fast Lua Object-Oriented Framework
 -- Copyright (c) 2026 Matus Kordos
 
-local PATH = (...):match("^(.*%.).-$") or ""
+local PATH = (...):match("^(.*)%..vector$") or "."
 local floof = require(PATH)
 
 -- cache
