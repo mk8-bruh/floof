@@ -5,7 +5,7 @@ if __floof_cache then return __floof_cache end
 
 local methods, module = {}, {}
 local named = setmetatable({}, {__mode = "v"})
-local ids   = setmetatable({}, {__mode = "v"})
+local addrs = setmetatable({}, {__mode = "v"})
 local refs  = setmetatable({}, {__mode = "k"})
 
 local metamethods = {
@@ -43,8 +43,8 @@ function methods.getClass(object)
     return refs[object] and refs[object].class
 end
 
-function methods.getInstance(id)
-    return ids[id]
+function methods.getInstance(addr)
+    return addrs[addr]
 end
 
 function methods.instanceOf(object, class)
@@ -90,6 +90,11 @@ function methods.isCallable(value)
 end
 
 function methods.getNamed(name) return named[name] end
+
+function methods.getAddress(value)
+    local ref = refs[value]
+    return ref and ref.addr
+end
 
 local function successEval(level, success, ...)
     if success then return ... else error(..., level) end
@@ -259,8 +264,7 @@ function methods.get(...)
     if not ref then
         error(("Invalid object: class or instance expected, got %s"):format(methods.typeOf(object)), 2)
     end
-    local isInst = ref.type == "instance"
-    if key == "id" or key == "super" or (isInst and key == "class") or (not isInst and key == "name") then
+    if key == "super" or (ref.type == "instance" and key == "class") or (ref.type == "class" and key == "name") then
         return ref[key]
     elseif type(key) == "string" and key:match("^__get_(.+)") then
         return methods.getGetter(object, key:match("^__get_(.+)"))
@@ -299,10 +303,10 @@ function methods.set(...)
         source, object, key, value = a, a, b, c
     end
     if not refs[source] then
-        print(...) -- this prints "class: Object" and "class: Element" which means the refs have to be working inside of the print statement
         error(("Invalid source: class or instance expected, got %s"):format(methods.typeOf(source)), 2)
     end
-    if not refs[object] then
+    local ref = refs[object]
+    if not ref then
         error(("Invalid object: class or instance expected, got %s"):format(methods.typeOf(object)), 2)
     end
     if type(key) == "string" and key:match("^__get_(.+)") then
@@ -311,7 +315,7 @@ function methods.set(...)
         return methods.safeReturn(methods.setter, object, key:match("^__set_(.+)"), value)
     elseif type(key) == "string" and key:match("^__(.+)") then
         return methods.safeReturn(methods.meta, object, key:match("^__(.+)"), value)
-    elseif refs[object][key] then
+    elseif key == "super" or (ref.type == "instance" and key == "class") or (ref.type == "class" and key == "name") then
         error(("Field %q is protected and cannot be modified"):format(key), 2)
     end
     while source do
@@ -343,7 +347,7 @@ for name, metamethod in pairs(metamethods) do
                 local ref = refs[object]
                 return ("%s: %s"):format(
                     ref.class and refs[ref.class].name or "instance",
-                    ref.id
+                    ref.addr
                 )
             end
             error(("Metamethod %q is not defined for %s"):format(name, tostring(object)), 2)
@@ -367,17 +371,17 @@ function methods.construct(cls, ...)
         error(("Invalid class (got: %s)"):format(tostring(cls)), 2)
     end
     local obj = {}
-    local id = tostring(obj):match("table: (.+)")
+    local addr = tostring(obj):match("table: (.+)")
     local ref = {
         type    = "instance",
-        id      = id,
+        addr    = addr,
         class   = cls ~= module and cls or nil,
         super   = cls ~= module and refs[cls].super or nil,
         getters = {},
         setters = {},
         meta    = {}
     }
-    ids[id] = obj
+    addrs[addr] = obj
     refs[obj] = ref
     setmetatable(obj, objectMt)
     local init = methods.getMeta(obj, "init")
@@ -394,7 +398,7 @@ local classMt = {
     __metatable = {},
     __tostring  = function(class)
         local ref = refs[class]
-        return ("class: %s"):format(ref.name or ref.id)
+        return ("class: %s"):format(ref.name or ref.addr)
     end,
     __call = methods.construct
 }
@@ -414,17 +418,17 @@ function methods.class(super, name)
         end
         named[name] = cls
     end
-    local id = tostring(cls):match("table: (.+)")
+    local addr = tostring(cls):match("table: (.+)")
     local ref = {
         type    = "class",
-        id      = id,
+        addr    = addr,
         name    = name,
         super   = super,
         getters = {},
         setters = {},
         meta    = {}
     }
-    ids[id] = cls
+    addrs[addr] = cls
     refs[cls] = ref
     setmetatable(cls, classMt)
     local setup = methods.getMeta(cls, "setup")
