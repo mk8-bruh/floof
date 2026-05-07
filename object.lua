@@ -1727,10 +1727,12 @@ function render(self)
     local drawn, curr = {}, self ~= Object and self or backmostActive(self)
     while curr do
         while true do
-            pushGraphics("all")
-            handleCallback(curr, "predraw")
             local backmost = backmostActive(curr)
-            if backmost then curr = backmost else break end
+            if backmost then
+                pushGraphics("all")
+                handleCallback(curr, "predraw")
+                curr = backmost
+            else break end
         end
         while curr do
             local curr_p = priv[curr]
@@ -1748,6 +1750,8 @@ function render(self)
                 end
             end
             if not drawn[curr] then
+                pushGraphics("all")
+                handleCallback(curr, "predraw")
                 pushGraphics("all")
                 handleCallback(curr, "draw")
                 popGraphics()
