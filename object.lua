@@ -1726,20 +1726,6 @@ function render(self)
     validateObject(self, "caller", true)
     local drawn, curr = {}, self ~= Object and self or backmostActive(self)
     while curr do
-        local curr_p = priv[curr]
-        if curr ~= self and curr_p.z >= 0 then
-            if curr_p.parent and not drawn[curr_p.parent] then
-                pushGraphics("all")
-                handleCallback(curr_p.parent, "draw")
-                popGraphics()
-                drawn[curr_p.parent] = true
-            elseif love and self == Object and not curr_p.parent and not drawn[love] then
-                pushGraphics("all")
-                floof.safeInvoke(love.draw)
-                popGraphics()
-                drawn[love] = true
-            end
-        end
         while true do
             pushGraphics("all")
             handleCallback(curr, "predraw")
@@ -1747,6 +1733,20 @@ function render(self)
             if backmost then curr = backmost else break end
         end
         while curr do
+            local curr_p = priv[curr]
+            if curr ~= self and curr_p.z >= 0 then
+                if curr_p.parent and not drawn[curr_p.parent] then
+                    pushGraphics("all")
+                    handleCallback(curr_p.parent, "draw")
+                    popGraphics()
+                    drawn[curr_p.parent] = true
+                elseif love and self == Object and not curr_p.parent and not drawn[love] then
+                    pushGraphics("all")
+                    floof.safeInvoke(love.draw)
+                    popGraphics()
+                    drawn[love] = true
+                end
+            end
             if not drawn[curr] then
                 pushGraphics("all")
                 handleCallback(curr, "draw")

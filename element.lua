@@ -1284,11 +1284,10 @@ function setters:p(value)
     local self_p = priv[self]
     if self_p.leftPadding or self_p.topPadding or self_p.rightPadding or self_p.bottomPadding then
         error("Cannot modify the raw padding of an Element with dynamic padding", 2)
-    else
-        operation(dmx, self, value - self_p.lp, value - self_p.rp)
-        operation(dmy, self, value - self_p.tp, value - self_p.bp)
-        flushOperations()
     end
+    operation(dpx, self, value - self_p.lp, value - self_p.rp)
+    operation(dpy, self, value - self_p.tp, value - self_p.bp)
+    flushOperations()
 end
 
 function setters:space(value)
@@ -1299,10 +1298,9 @@ function setters:space(value)
     local self_p = priv[self]
     if self_p.spacing then
         error("Cannot modify the raw space of an Element with dynamic spacing", 2)
-    else
-        operation(ds, self, value - self_p.space)
-        flushOperations()
     end
+    operation(ds, self, value - self_p.space)
+    flushOperations()
 end
 
 function setters:offsetX(value)
