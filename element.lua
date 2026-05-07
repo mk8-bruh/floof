@@ -1,8 +1,9 @@
 -- FLOOF: Fast Lua Element-Oriented Framework
 -- Copyright (c) 2026 Matus Kordos
 
-local PATH = (...):match("^(.*)%.element$") or "."
-local floof = require(PATH)
+if not __FLOOF_CACHE then error("Floof is not loaded! You must require the main module before loading any classes.", 2) end
+if __FLOOF_CACHE.submodules.element then return __FLOOF_CACHE.submodules.element end
+local floof = __FLOOF_CACHE.main
 local array, vec, Object = floof.array, floof.vector, floof.object
 
 local Element = Object:class("Element")

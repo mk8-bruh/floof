@@ -1,8 +1,9 @@
 -- FLOOF: Fast Lua Object-Oriented Framework
 -- Copyright (c) 2026 Matus Kordos
 
-local PATH = (...):match("^(.*)%..vector$") or "."
-local floof = require(PATH)
+if not __FLOOF_CACHE then error("Floof is not loaded! You must require the main module before loading any classes.", 2) end
+if __FLOOF_CACHE.submodules.vector then return __FLOOF_CACHE.submodules.vector end
+local floof = __FLOOF_CACHE.main
 
 -- cache
 

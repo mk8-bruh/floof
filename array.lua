@@ -1,8 +1,9 @@
 -- FLOOF: Fast Lua Object-Oriented Framework
 -- Copyright (c) 2026 Matus Kordos
 
-local PATH = (...):match("^(.*)%.array$") or "."
-local floof = require(PATH)
+if not __FLOOF_CACHE then error("Floof is not loaded! You must require the main module before loading any classes.", 2) end
+if __FLOOF_CACHE.submodules.array then return __FLOOF_CACHE.submodules.array end
+local floof = __FLOOF_CACHE.main
 
 local Array = floof:class("Array")
 Array.Proxy = Array:class("Array.Proxy")

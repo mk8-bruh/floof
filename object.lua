@@ -7,8 +7,9 @@ local STORE_HANDLER_SOURCE = true
 -- FLOOF: Fast Lua Object-Oriented Framework
 -- Copyright (c) 2026 Matus Kordos
 
-local PATH = (...):match("^(.*)%.object$") or "."
-local floof = require(PATH)
+if not __FLOOF_CACHE then error("Floof is not loaded! You must require the main module before loading any classes.", 2) end
+if __FLOOF_CACHE.submodules.object then return __FLOOF_CACHE.submodules.object end
+local floof = __FLOOF_CACHE.main
 local array, vec = floof.array, floof.vector
 
 local error, unpack = error, unpack
