@@ -174,7 +174,7 @@ Object.invokeHandlers = function(...) return invokeHandlers(...) end
 
 function registerHandler(...)
     local who, event, handler, priority
-    if floof.subclassOf(..., Object) or floof.instanceOf(..., Object) then
+    if ... == Object or floof.subclassOf(..., Object) or floof.instanceOf(..., Object) then
         who, event, handler, priority = ...
     else
         event, handler, priority = ...
@@ -215,7 +215,7 @@ Object.registerHandler = registerHandler
 
 function removeHandler(...)
     local who, event, handler
-    if floof.subclassOf(..., Object) or floof.instanceOf(..., Object) then
+    if ... == Object or floof.subclassOf(..., Object) or floof.instanceOf(..., Object) then
         who, event, handler = ...
     else
         event, handler = ...
