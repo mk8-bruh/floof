@@ -62,7 +62,7 @@ local function initPrivInstance(self)
         leftPadding = nil, topPadding = nil, rightPadding = nil, bottomPadding = nil,
         inLayout = true, layoutIndex = nil, offsetX = 0, offsetY = 0, lockedX = false, lockedY = false,
         layoutDirection = "column", justifyChildren = "top", alignChildren = "center",
-        space = 0, spacing = nil, spaceAround = false, expandSpace = false, extraRoom = 0,
+        space = 0, spacing = nil, spaceAround = false, expandSpace = false, extraRoom = 0, totalSpace = 0,
         firstChildElement = nil, lastChildElement = nil, layoutCount = 0,
         layoutContentSize = 0, scroll = 0, minScroll = 0, maxScroll = 0
     }
