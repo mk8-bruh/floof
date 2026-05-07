@@ -1666,7 +1666,8 @@ Object.setListeningStatus, setters.isListening = listeningStatus, listeningStatu
 function listenerEvent(self, name, ...)
     validateObject(self, "caller", true)
     local handleLove = self == Object and love ~= nil
-    for ls in iterateListener(self == Object and Object_p.firstListener or self, self == Object) do
+    local st = self == Object and select(2, iterateListener(Object_p.firstListener)) or select(2, iterateListener(self))
+    for ls in rawget, st, self == Object do
         local ls_p = priv[ls]
         if handleLove and ls_p.listenerPriority < 0 then
             handleLove = false

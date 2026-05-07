@@ -522,7 +522,6 @@ return setmetatable(module, {
         elseif __FLOOF_CACHE.submodules[k] then
             return __FLOOF_CACHE.submodules[k]
         else
-            print(PATH:format(k))
             local sm = require(PATH:format(k))
             __FLOOF_CACHE.submodules[k] = sm
             return sm
