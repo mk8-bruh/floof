@@ -1724,48 +1724,50 @@ Object.broadcast, Object.broadcastAll = broadcast, broadcastAll
 
 function render(self)
     validateObject(self, "caller", true)
-    local drawn, curr = {}, self ~= Object and self or backmostActive(self)
+    local drawn, curr = {}, self
     while curr do
-        while true do
+        local curr_p = priv[curr]
+        if curr ~= self and curr_p.z >= 0 then
+            if curr_p.parent and not drawn[curr_p.parent] then
+                pushGraphics("all")
+                handleCallback(curr_p.parent, "draw")
+                popGraphics()
+            elseif not curr_p.parent and love and not drawn[love] then
+                pushGraphics("all")
+                floof.safeInvoke(love.draw)
+                popGraphics()
+            end
+        end
+        if curr ~= Object then
             pushGraphics("all")
             handleCallback(curr, "predraw")
-            local backmost = backmostActive(curr)
-            if backmost then curr = backmost else break end
         end
-        while curr do
-            local curr_p = priv[curr]
-            if curr ~= self and curr_p.z >= 0 then
-                if curr_p.parent and not drawn[curr_p.parent] then
+        local backmost = backmostActive(curr)
+        if backmost then
+            local backmost_p = priv[backmost]
+            if backmost_p.z >= 0 then
+                if curr ~= Object and not drawn[curr] then
                     pushGraphics("all")
-                    handleCallback(curr_p.parent, "draw")
+                    handleCallback(curr, "draw")
                     popGraphics()
-                    drawn[curr_p.parent] = true
-                elseif love and self == Object and not curr_p.parent and not drawn[love] then
+                elseif curr == Object and love and not drawn[love] then
                     pushGraphics("all")
                     floof.safeInvoke(love.draw)
                     popGraphics()
-                    drawn[love] = true
                 end
             end
-            if not drawn[curr] then
+            curr = backmost
+        else
+            if curr ~= Object and not drawn[curr] then
                 pushGraphics("all")
                 handleCallback(curr, "draw")
                 popGraphics()
-                drawn[curr] = true
+            elseif curr == Object and love and not drawn[love] then
+                pushGraphics("all")
+                floof.safeInvoke(love.draw)
+                popGraphics()
             end
-            handleCallback(curr, "postdraw")
-            popGraphics()
-            if curr == self then break end
-            local backward = backwardActive(curr)
-            if backward then curr = backward break end
-            curr = priv[curr].parent
         end
-        if curr == self then break end
-    end
-    if love and self == Object and not drawn[love] then
-        pushGraphics("all")
-        floof.safeInvoke(love.draw)
-        popGraphics()
     end
 end
 Object.render = render
