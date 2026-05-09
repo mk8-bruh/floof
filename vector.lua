@@ -178,6 +178,15 @@ function Vector.clampLen(v, a, b)
     end
 end
 
+-- constants
+
+Vector.zero  = Vector( 0,  0)
+Vector.one   = Vector( 1,  1)
+Vector.left  = Vector(-1,  0)
+Vector.right = Vector( 1,  0)
+Vector.up    = Vector( 0, -1)
+Vector.down  = Vector( 0,  1)
+
 -- metamethods & operators
 
 function Vector:__get(k)
@@ -283,14 +292,5 @@ function Vector.__lessequal(a, b)
         error(fstr("Vector comparison only supported on operands of type: [vector, vector] (got: %s, %s)", floof.typeOf(a), floof.typeOf(b)), 2)
     end
 end
-
--- constants
-
-Vector.zero  = Vector( 0,  0)
-Vector.one   = Vector( 1,  1)
-Vector.left  = Vector(-1,  0)
-Vector.right = Vector( 1,  0)
-Vector.up    = Vector( 0, -1)
-Vector.down  = Vector( 0,  1)
 
 return Vector
