@@ -902,27 +902,27 @@ Object.moveToBack, setters.backmost = setBackmost, setBackmost
 function backwardActive(self)
     repeat
         self = priv[self].backward
-    until not self or priv[self].isActive
+    until not self or priv[self].activeSelf
     return self
 end
 function forwardActive(self)
     repeat
         self = priv[self].forward
-    until not self or priv[self].isActive
+    until not self or priv[self].activeSelf
     return self
 end
 getters.backwardActive, getters.forwardActive = backwardActive, forwardActive
 
 function frontmostActive(self)
     local frontmost = priv[self].frontmost
-    while frontmost and not priv[frontmost].isActive do
+    while frontmost and not priv[frontmost].activeSelf do
         frontmost = priv[frontmost].forward
     end
     return frontmost
 end
 function backmostActive(self)
     local backmost = priv[self].backmost
-    while backmost and not priv[backmost].isActive do
+    while backmost and not priv[backmost].activeSelf do
         backmost = priv[backmost].backward
     end
     return backmost
@@ -1724,7 +1724,7 @@ Object.broadcast, Object.broadcastAll = broadcast, broadcastAll
 
 function render(self)
     validateObject(self, "caller", true)
-    local drawn, curr = {}, self
+    local drawn, curr = {}, self == Object and backmostActive(self) or self
     while curr do
         local curr_p = priv[curr]
         if curr ~= self and curr_p.z >= 0 then
@@ -1732,42 +1732,41 @@ function render(self)
                 pushGraphics("all")
                 handleCallback(curr_p.parent, "draw")
                 popGraphics()
-            elseif not curr_p.parent and love and not drawn[love] then
+                drawn[curr_p.parent] = true
+            elseif not curr_p.parent and self == Object and love and not drawn[love] then
                 pushGraphics("all")
                 floof.safeInvoke(love.draw)
                 popGraphics()
+                drawn[love] = true
             end
         end
-        if curr ~= Object then
-            pushGraphics("all")
-            handleCallback(curr, "predraw")
-        end
+        pushGraphics("all")
+        handleCallback(curr, "predraw")
         local backmost = backmostActive(curr)
         if backmost then
-            local backmost_p = priv[backmost]
-            if backmost_p.z >= 0 then
-                if curr ~= Object and not drawn[curr] then
+            curr = backmost
+        else
+            local backward
+            repeat
+                if not drawn[curr] then
                     pushGraphics("all")
                     handleCallback(curr, "draw")
                     popGraphics()
-                elseif curr == Object and love and not drawn[love] then
-                    pushGraphics("all")
-                    floof.safeInvoke(love.draw)
-                    popGraphics()
+                    drawn[curr] = true
                 end
-            end
-            curr = backmost
-        else
-            if curr ~= Object and not drawn[curr] then
-                pushGraphics("all")
-                handleCallback(curr, "draw")
+                handleCallback(curr, "postdraw")
                 popGraphics()
-            elseif curr == Object and love and not drawn[love] then
-                pushGraphics("all")
-                floof.safeInvoke(love.draw)
-                popGraphics()
-            end
+                if curr == self then break end
+                backward = backwardActive(curr)
+                curr = priv[curr].parent
+            until backward or not curr
+            curr = backward
         end
+    end
+    if self == Object and love and not drawn[love] then
+        pushGraphics("all")
+        floof.safeInvoke(love.draw)
+        popGraphics()
     end
 end
 Object.render = render
