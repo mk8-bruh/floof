@@ -1391,6 +1391,29 @@ function setters:height(value)
     flushOperations()
 end
 
+function setters:size(value)
+    validateElement(self, "self", false)
+    local self_p = priv[self]
+    if value == nil then
+        self_p.width, self_p.height = nil
+        return
+    elseif type(value) == "string" then
+        local val = tonumber(value:match("^%s*(%d*%.?%d+)%s*%%?%s*$"))
+        if val then
+            value = val / 100
+        else
+            error(("Invalid value string (%q): must be a valid number or percentage"):format(value), 2)
+        end
+    elseif type(value) ~= "number" then
+        error(("Invalid value: number or string expected, got %s"):format(floof.typeOf(value)), 2)
+    end
+    local parent_p = priv[self_p.parentElement] or Element_p
+    self_p.width, self_p.height = value, value
+    operation(dw, self, (parent_p.w - parent_p.lp - parent_p.rp) * value - self_p.w)
+    operation(dh, self, (parent_p.h - parent_p.tp - parent_p.bp) * value - self_p.h)
+    flushOperations()
+end
+
 function setters:leftMargin(value)
     validateElement(self, "self", false)
     local self_p = priv[self]
