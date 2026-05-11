@@ -1462,10 +1462,12 @@ function addListener(self)
             end
             self_p.previousListener, self_p.nextListener = ls, ls_p.nextListener
             ls_p.nextListener = self
+            return
         elseif not ls_p.previousListener then
             Object_p.firstListener = self
             self_p.previousListener, self_p.nextListener = nil, ls
             ls_p.previousListener = self
+            return
         end
     end
 end
