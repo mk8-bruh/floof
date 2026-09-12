@@ -2172,7 +2172,7 @@ function setters:scroll(value)
         error(("Invalid value: number expected, got %s"):format(floof.typeOf(value)), 2)
     end
     local self_p = priv[self]
-    value = math.max(self_p.minScroll, math.min*self_p.maxScroll, value)
+    value = math.max(self_p.minScroll, math.min(self_p.maxScroll, value))
     local d = value - self_p.scroll
     self_p.scroll = value
     for elem in iterateElementChildren(self) do

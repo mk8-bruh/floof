@@ -648,11 +648,13 @@ function activeState(self, state)
         if curr_p.isActive ~= state then
             curr_p.isActive = state
             if curr_p.isInitialized then
-                invokeHandlers(self, state and "activated" or "deactivated")
-                handleCallback(self, state and "activated" or "deactivated")
+                invokeHandlers(curr, state and "activated" or "deactivated")
+                handleCallback(curr, state and "activated" or "deactivated")
             end
             for ch in frontToBack(curr) do
-                q[tail], tail = ch, ch
+                if not state or priv[ch].activeSelf then
+                    q[tail], tail = ch, ch
+                end
             end
         end
         curr = q[curr]
@@ -1319,7 +1321,7 @@ function movePointer(self, x, y, dx, dy, ...)
                     wasBehind or
                     not handleCallback(ch, "check", px, py)
                 ) and floof.safeInvoke(checkHover, ch, ...)
-                then old, new, hov = hov, ch break end
+                then old, new, hov = old or hov, ch break end
             end
         end
         curr_p.hoverTarget = new or hov
@@ -1677,12 +1679,13 @@ function listenerEvent(self, name, ...)
         end
         if ls_p.isActive and ls_p.isListening then
             invokeHandlers(ls, name, ...)
-            handleCallback(ls, name, ...)
+            local r = handleCallback(ls, name, ...)
+            if r then return r end
         end
     end
     if handleLove and name then 
         invokeHandlers(name, ...)
-        floof.safeInvoke(love[name], ...)
+        return floof.safeInvoke(love[name], ...)
     end
 end
 Object.listenerEvent = listenerEvent
