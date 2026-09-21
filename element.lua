@@ -14,8 +14,8 @@ local dx, dy,
       dw, dh,
       dmx, dmy,
       dpx, dpy,
-      ds, droom,
-      anchor
+      ds, droom, syncSpace,
+      anchor, relayout, scheduleLayout
 
 local isBefore,
       setSortOrder,
@@ -157,6 +157,13 @@ end
 
 local operations = {}
 local dirty, clean
+local pendingLayout = setmetatable({}, {__mode = "k"})
+
+local operation, flushOperations
+
+function scheduleLayout(self)
+    if priv[self] then pendingLayout[self] = true end
+end
 
 function operation(f, ...)
     local op = {func = f, ...}
@@ -168,23 +175,40 @@ function operation(f, ...)
 end
 
 function flushOperations()
-    if operations.running or not operations.head then return end
+    if operations.running then return end
+    if not operations.head and not next(pendingLayout) then return end
     operations.running = true
     dirty, clean = {}, {}
-    while operations.head do
-        local op = operations.head
-        local s, e = pcall(op.func, unpack(op))
-        if not s then error(e, 3) end
-        if operations[op] then
-            operations.head, operations[op] = operations[op]
+    local function fail(e)
+        operations.running = false
+        error(e, 4)
+    end
+    while true do
+        if operations.head then
+            local op = operations.head
+            local s, e = pcall(op.func, unpack(op))
+            if not s then fail(e) end
+            if operations[op] then
+                operations.head, operations[op] = operations[op]
+            else
+                operations.head, operations.tail = nil
+            end
         else
-            operations.head, operations.tail = nil
-            for el in pairs(dirty) do
-                if not clean[el] then
-                    local s, e = pcall(Object.shapeChanged, el)
-                    if not s then error(e, 3) end
-                    clean[el] = true
+            local due = next(pendingLayout)
+            if due then
+                pendingLayout[due] = nil
+                local s, e = pcall(relayout, due)
+                if not s then fail(e) end
+            else
+                local any = false
+                for el in pairs(dirty) do
+                    if not clean[el] then
+                        clean[el], any = true, true
+                        local s, e = pcall(Object.shapeChanged, el)
+                        if not s then fail(e) end
+                    end
                 end
+                if not any and not operations.head and not next(pendingLayout) then break end
             end
         end
     end
@@ -247,39 +271,8 @@ function dw(self, d)
         -- position
         if self_p.anchorX == "left" or self == Element then
             operation(dx, self, d/2)
-            if parent_p.layoutDirection == "row" and self_p.layoutIndex then
-                for sib in iterateElement(self) do
-                    local sib_p = priv[sib]
-                    if sib_p.inLayout then
-                        operation(dx, sib, d)
-                    end
-                end
-            end
-        elseif self_p.anchorX == "center" then
-            if parent_p.layoutDirection == "row" and self_p.layoutIndex then
-                for sib in iterateElement(self) do
-                    local sib_p = priv[sib]
-                    if sib_p.inLayout then
-                        operation(dx, sib, d/2)
-                    end
-                end
-                for sib in backtrackElement(self) do
-                    local sib_p = priv[sib]
-                    if sib_p.inLayout then
-                        operation(dx, sib, -d/2)
-                    end
-                end
-            end
         elseif self_p.anchorX == "right" then
             operation(dx, self, -d/2)
-            if parent_p.layoutDirection == "row" and self_p.layoutIndex then
-                for sib in backtrackElement(self) do
-                    local sib_p = priv[sib]
-                    if sib_p.inLayout then
-                        operation(dx, sib, -d)
-                    end
-                end
-            end
         end
     end
     self_p.w = self_p.w + d
@@ -339,39 +332,8 @@ function dh(self, d)
         -- position
         if self_p.anchorY == "top" or self == Element then
             operation(dy, self, d/2)
-            if parent_p.layoutDirection == "column" and self_p.layoutIndex then
-                for sib in iterateElement(self) do
-                    local sib_p = priv[sib]
-                    if sib_p.inLayout then
-                        operation(dy, sib, d)
-                    end
-                end
-            end
-        elseif self_p.anchorY == "middle" then
-            if parent_p.layoutDirection == "column" and self_p.layoutIndex then
-                for sib in iterateElement(self) do
-                    local sib_p = priv[sib]
-                    if sib_p.inLayout then
-                        operation(dy, sib, d/2)
-                    end
-                end
-                for sib in backtrackElement(self) do
-                    local sib_p = priv[sib]
-                    if sib_p.inLayout then
-                        operation(dy, sib, -d/2)
-                    end
-                end
-            end
         elseif self_p.anchorY == "bottom" then
             operation(dy, self, -d/2)
-            if parent_p.layoutDirection == "column" and self_p.layoutIndex then
-                for sib in backtrackElement(self) do
-                    local sib_p = priv[sib]
-                    if sib_p.inLayout then
-                        operation(dy, sib, -d)
-                    end
-                end
-            end
         end
     end
     self_p.h = self_p.h + d
@@ -418,42 +380,13 @@ function dmx(self, l, r)
     local d, c = l + r, (l - r) / 2
     if self_p.anchorX == "left" then
         if l ~= 0 then operation(dx, self, l) end
-        if d ~= 0 and parent_p.layoutDirection == "row" and self_p.layoutIndex then
-            for sib in iterateElement(self) do
-                local sib_p = priv[sib]
-                if sib_p.inLayout then
-                    operation(dx, sib, d)
-                end
-            end
-        end
     elseif self_p.anchorX == "right" then
         if r ~= 0 then operation(dx, self, -r) end
-        if d ~= 0 and parent_p.layoutDirection == "row" and self_p.layoutIndex then
-            for sib in backtrackElement(self) do
-                local sib_p = priv[sib]
-                if sib_p.inLayout then
-                    operation(dx, sib, -d)
-                end
-            end
-        end
+    elseif self_p.anchorX == "stretch" then
+        if c ~= 0 then operation(dx, self, c) end
+        if d ~= 0 then operation(dw, self, -d) end
     else
         if c ~= 0 then operation(dx, self, c) end
-        if d ~= 0 and parent_p.layoutDirection == "row" and self_p.layoutIndex then
-            for sib in iterateElement(self) do
-                local sib_p = priv[sib]
-                if sib_p.inLayout then
-                    operation(dx, sib, d/2)
-                end
-            end
-            for sib in backtrackElement(self) do
-                local sib_p = priv[sib]
-                if sib_p.inLayout then
-                    operation(dx, sib, -d/2)
-                end
-            end
-        elseif d ~= 0 and self_p.anchorX == "stretch" then
-            operation(dw, self, -d)
-        end
     end
     if self_p.layoutIndex and parent_p.layoutDirection == "row" then operation(droom, self_p.parentElement or Element, -d) end
 end
@@ -467,42 +400,13 @@ function dmy(self, t, b)
     local d, c = t + b, (t - b) / 2
     if self_p.anchorY == "top" then
         if t ~= 0 then operation(dy, self, t) end
-        if d ~= 0 and parent_p.layoutDirection == "column" and self_p.layoutIndex then
-            for sib in iterateElement(self) do
-                local sib_p = priv[sib]
-                if sib_p.inLayout then
-                    operation(dy, sib, d)
-                end
-            end
-        end
     elseif self_p.anchorY == "bottom" then
         if b ~= 0 then operation(dy, self, -b) end
-        if d ~= 0 and parent_p.layoutDirection == "column" and self_p.layoutIndex then
-            for sib in backtrackElement(self) do
-                local sib_p = priv[sib]
-                if sib_p.inLayout then
-                    operation(dy, sib, -d)
-                end
-            end
-        end
+    elseif self_p.anchorY == "expand" then
+        if c ~= 0 then operation(dy, self, c) end
+        if d ~= 0 then operation(dh, self, -d) end
     else
         if c ~= 0 then operation(dy, self, c) end
-        if d ~= 0 and parent_p.layoutDirection == "column" and self_p.layoutIndex then
-            for sib in iterateElement(self) do
-                local sib_p = priv[sib]
-                if sib_p.inLayout then
-                    operation(dy, sib, d/2)
-                end
-            end
-            for sib in backtrackElement(self) do
-                local sib_p = priv[sib]
-                if sib_p.inLayout then
-                    operation(dy, sib, -d/2)
-                end
-            end
-        elseif d ~= 0 and self_p.anchorY == "expand" then
-            operation(dh, self, -d)
-        end
     end
     if self_p.layoutIndex and parent_p.layoutDirection == "column" then operation(droom, self_p.parentElement or Element, -d) end
 end
@@ -563,7 +467,7 @@ function dpy(self, t, b)
         if d ~= 0 then
             if elem_p.height then
                 operation(dh, elem, elem_p.height * -d)
-            elseif elem_p.anchorY == "stretch" then
+            elseif elem_p.anchorY == "expand" then
                 operation(dh, elem, -d)
             end
         end
@@ -575,313 +479,201 @@ function ds(self, d, room)
     if d == 0 then return end
     local self_p = priv[self]
     self_p.totalSpace = self_p.totalSpace + d
-    local tr
-    if self_p.justifyChildren == "left" or self_p.justifyChildren == "top" then
-        tr = self_p.spaceAround and d or 0
-    elseif self_p.justifyChildren == "center" or self_p.justifyChildren == "middle" then
-        tr = -d * (self_p.layoutCount - 1) / 2
-    elseif self_p.justifyChildren == "right" or self_p.justifyChildren == "bottom" then
-        tr = -d * (self_p.layoutCount + (self_p.spaceAround and 1 or 0))
-    end
-    for elem in iterateElementChildren(self) do
-        local elem_p = priv[elem]
-        if elem_p.inLayout then
-            if self_p.layoutDirection == "row" then
-                operation(dx, elem, tr)
-            elseif self_p.layoutDirection == "column" then
-                operation(dy, elem, tr)
-            end
-        end
-        if elem_p.layoutIndex then tr = tr + d end
-    end
     if not room then
         self_p.space = self_p.space + d
         operation(droom, self, -d * math.max(self_p.layoutCount + (self_p.spaceAround and 1 or -1), 0))
     end
+    scheduleLayout(self)
+end
+
+function syncSpace(self)
+    local self_p = priv[self]
+    local ns = self_p.layoutCount + (self_p.spaceAround and 1 or -1)
+    local target = self_p.space
+    if self_p.expandSpace and ns > 0 then
+        target = target + math.max(self_p.extraRoom, 0) / ns
+    end
+    ds(self, target - self_p.totalSpace, true)
+end
+
+local function gapCount(self_p)
+    return math.max(self_p.layoutCount + (self_p.spaceAround and 1 or -1), 0)
+end
+
+local function syncScroll(self_p)
+    local justify = self_p.justifyChildren
+    if justify == "left" or justify == "top" then
+        self_p.minScroll, self_p.maxScroll = math.min(self_p.extraRoom, 0), 0
+    elseif justify == "right" or justify == "bottom" then
+        self_p.minScroll, self_p.maxScroll = 0, math.max(-self_p.extraRoom, 0)
+    else
+        self_p.minScroll, self_p.maxScroll = math.min(self_p.extraRoom/2, 0), math.max(-self_p.extraRoom/2, 0)
+    end
+    self_p.scroll = math.max(self_p.minScroll, math.min(self_p.maxScroll, self_p.scroll))
 end
 
 function droom(self, d)
     if d == 0 then return end
     local self_p = priv[self]
-    local dr = math.max(self_p.extraRoom + d, 0) - math.max(self_p.extraRoom, 0)
-    local ns = math.max(self_p.layoutCount + (self_p.spaceAround and 1 or -1), 0)
     self_p.extraRoom = self_p.extraRoom + d
-    local scr = 0
-    if self_p.justifyChildren == "left" or self_p.justifyChildren == "top" then
-        self_p.minScroll, self_p.maxScroll = math.min(self_p.extraRoom, 0), 0
-    elseif self_p.justifyChildren == "center" or self_p.justifyChildren == "middle" then
-        self_p.minScroll, self_p.maxScroll = math.min(self_p.extraRoom/2, 0), math.max(-self_p.extraRoom/2, 0)
-    elseif self_p.justifyChildren == "right" or self_p.justifyChildren == "bottom" then
-        self_p.minScroll, self_p.maxScroll = 0, math.max(-self_p.extraRoom, 0)
-    end
-    if self_p.scroll < self_p.minScroll then
-        scr = self_p.minScroll - self_p.scroll
-        self_p.scroll = self_p.minScroll
-    elseif self_p.scroll > self_p.maxScroll then
-        scr = self_p.maxScroll - self_p.scroll
-        self_p.scroll = self_p.maxScroll
-    end
-    if self_p.expandSpace and ns > 0 then
-        operation(ds, self, dr / ns, true)
-    end
-    for elem in iterateElementChildren(self) do
-        local elem_p = priv[elem]
-        if elem_p.inLayout and scr ~= 0 then
-            if self_p.layoutDirection == "row" then
-                operation(dx, elem, scr)
-            elseif self_p.layoutDirection == "column" then
-                operation(dy, elem, scr)
-            end
-        end
+    syncScroll(self_p)
+    operation(syncSpace, self)
+    scheduleLayout(self)
+end
+
+local function mainExtent(parent_p, self_p)
+    if parent_p.layoutDirection == "row" then
+        return self_p.lm + self_p.w + self_p.rm
+    else
+        return self_p.tm + self_p.h + self_p.bm
     end
 end
 
-function anchor(self, alreadyActive)
+local function mainTarget(parent_p, self_p, before, after)
+    local row = parent_p.layoutDirection == "row"
+    local edge = parent_p.spaceAround and parent_p.totalSpace or 0
+    local justify = parent_p.justifyChildren
+    if justify == "left" or justify == "top" then
+        return (row and parent_p.l + parent_p.lp or parent_p.t + parent_p.tp)
+            + parent_p.scroll + edge + before
+    elseif justify == "right" or justify == "bottom" then
+        return (row and parent_p.r - parent_p.rp or parent_p.b - parent_p.bp)
+            + parent_p.scroll - edge - after - mainExtent(parent_p, self_p)
+    else
+        return (row and parent_p.x or parent_p.y)
+            + parent_p.scroll + (before - after - mainExtent(parent_p, self_p)) / 2
+    end
+end
+
+function anchor(self, before, after)
     local self_p = priv[self]
     local parent_p = priv[self_p.parentElement] or Element_p
+    local row = parent_p.layoutDirection == "row"
     local x, y = 0, 0
-    if self_p.inLayout and parent_p.justifyChildren == "left" then
-        self_p.anchorX = "left"
-        x = parent_p.l + parent_p.lp + parent_p.scroll +
-            (parent_p.spaceAround and parent_p.totalSpace * (alreadyActive and 1 or 0.5) or 0) -
-            (alreadyActive and self_p.l - self_p.lm or self_p.x) + self_p.offsetX
-        for sib in backtrackElement(self) do
-            local sib_p = priv[sib]
-            if sib_p.layoutIndex then
-                x = x + sib_p.lm + sib_p.w + sib_p.rm + parent_p.totalSpace
+    if self_p.inLayout then
+        if not before then
+            before, after = 0, 0
+            for sib in backtrackElement(self) do
+                local sib_p = priv[sib]
+                if sib_p.layoutIndex then
+                    before = before + mainExtent(parent_p, sib_p) + parent_p.totalSpace
+                end
+            end
+            for sib in iterateElement(self) do
+                local sib_p = priv[sib]
+                if sib_p.layoutIndex then
+                    after = after + mainExtent(parent_p, sib_p) + parent_p.totalSpace
+                end
             end
         end
-    elseif self_p.inLayout and parent_p.justifyChildren == "center" then
-        self_p.anchorX = "center"
-        x = parent_p.x + parent_p.scroll + self_p.offsetX
-        for sib in backtrackElement(self) do
-            local sib_p = priv[sib]
-            if sib_p.layoutIndex then
-                x = x + (sib_p.lm + sib_p.w + sib_p.rm + parent_p.totalSpace) / 2
-            end
+        local target = mainTarget(parent_p, self_p, before, after)
+        if row then
+            self_p.anchorX = parent_p.justifyChildren
+            x = target - (self_p.l - self_p.lm)
+        else
+            self_p.anchorY = parent_p.justifyChildren
+            y = target - (self_p.t - self_p.tm)
         end
-        for sib in iterateElement(self) do
-            local sib_p = priv[sib]
-            if sib_p.layoutIndex then
-                x = x - (sib_p.lm + sib_p.w + sib_p.rm + parent_p.totalSpace) / 2
-            end
-        end
-    elseif self_p.inLayout and parent_p.justifyChildren == "right" then
-        self_p.anchorX = "right"
-        x = parent_p.r - parent_p.rp + parent_p.scroll -
-            (parent_p.spaceAround and parent_p.totalSpace * (alreadyActive and 1 or 0.5) or 0) -
-            (alreadyActive and self_p.r - self_p.rm or self_p.x) + self_p.offsetX
-        for sib in iterateElement(self) do
-            local sib_p = priv[sib]
-            if sib_p.layoutIndex then
-                x = x - (sib_p.lm + sib_p.w + sib_p.rm + parent_p.totalSpace)
-            end
-        end
-    elseif (self_p.alignX or self_p.inLayout and parent_p.alignChildren) == "left" then
-        self_p.anchorX = "left"
-        x = parent_p.l + parent_p.lp + self_p.offsetX - self_p.l + self_p.lm
-    elseif (self_p.alignX or self_p.inLayout and parent_p.alignChildren) == "center" or (not self_p.inLayout and not self_p.alignX) then
-        self_p.anchorX = "center"
-        x = parent_p.x + self_p.offsetX - self_p.x
-    elseif (self_p.alignX or self_p.inLayout and parent_p.alignChildren) == "right" then
-        self_p.anchorX = "right"
-        x = parent_p.r - parent_p.rp + self_p.offsetX - self_p.r - self_p.rm
-    elseif (self_p.alignX or self_p.inLayout and parent_p.alignChildren) == "stretch" then
-        self_p.anchorX = "stretch"
-        x = parent_p.x + self_p.offsetX + (self_p.lm - self_p.rm) / 2 - self_p.x
-        operation(dw, self, parent_p.w - parent_p.lp - parent_p.rp - self_p.w - self_p.lm - self_p.rm)
     end
-    if self_p.inLayout and parent_p.justifyChildren == "top" then
-        self_p.anchorY = "top"
-        y = parent_p.t + parent_p.tp + parent_p.scroll +
-            (parent_p.spaceAround and parent_p.totalSpace * (alreadyActive and 1 or 0.5) or 0) -
-            (alreadyActive and self_p.t - self_p.tm or self_p.y) + self_p.offsetY
-        for sib in backtrackElement(self) do
-            local sib_p = priv[sib]
-            if sib_p.layoutIndex then
-                y = y + sib_p.tm + sib_p.h + sib_p.bm + parent_p.totalSpace
-            end
+    -- cross axis
+    if not (self_p.inLayout and row) then
+        local align = self_p.alignX or self_p.inLayout and parent_p.alignChildren
+        if align == "left" then
+            self_p.anchorX = "left"
+            x = parent_p.l + parent_p.lp + self_p.offsetX - self_p.l + self_p.lm
+        elseif align == "right" then
+            self_p.anchorX = "right"
+            x = parent_p.r - parent_p.rp + self_p.offsetX - self_p.r - self_p.rm
+        elseif align == "stretch" then
+            self_p.anchorX = "stretch"
+            x = parent_p.x + self_p.offsetX + (self_p.lm - self_p.rm) / 2 - self_p.x
+            operation(dw, self, parent_p.w - parent_p.lp - parent_p.rp - self_p.w - self_p.lm - self_p.rm)
+        else
+            self_p.anchorX = "center"
+            x = parent_p.x + self_p.offsetX - self_p.x
         end
-    elseif self_p.inLayout and parent_p.justifyChildren == "middle" then
-        self_p.anchorY = "middle"
-        y = parent_p.y + parent_p.scroll + self_p.offsetY
-        for sib in backtrackElement(self) do
-            local sib_p = priv[sib]
-            if sib_p.layoutIndex then
-                y = y + (sib_p.tm + sib_p.h + sib_p.bm + parent_p.totalSpace) / 2
-            end
+    end
+    if not (self_p.inLayout and not row) then
+        local align = self_p.alignY or self_p.inLayout and parent_p.alignChildren
+        if align == "top" then
+            self_p.anchorY = "top"
+            y = parent_p.t + parent_p.tp + self_p.offsetY - self_p.t + self_p.tm
+        elseif align == "bottom" then
+            self_p.anchorY = "bottom"
+            y = parent_p.b - parent_p.bp + self_p.offsetY - self_p.b - self_p.bm
+        elseif align == "expand" then
+            self_p.anchorY = "expand"
+            y = parent_p.y + self_p.offsetY + (self_p.tm - self_p.bm) / 2 - self_p.y
+            operation(dh, self, parent_p.h - parent_p.tp - parent_p.bp - self_p.h - self_p.tm - self_p.bm)
+        else
+            self_p.anchorY = "middle"
+            y = parent_p.y + self_p.offsetY - self_p.y
         end
-        for sib in iterateElement(self) do
-            local sib_p = priv[sib]
-            if sib_p.layoutIndex then
-                y = y - (sib_p.tm + sib_p.h + sib_p.bm + parent_p.totalSpace) / 2
-            end
-        end
-    elseif self_p.inLayout and parent_p.justifyChildren == "bottom" then
-        self_p.anchorY = "bottom"
-        y = parent_p.b - parent_p.bp + parent_p.scroll -
-            (parent_p.spaceAround and parent_p.totalSpace * (alreadyActive and 1 or 0.5) or 0) -
-            (alreadyActive and self_p.b - self_p.bm or self_p.x) + self_p.offsetY
-        for sib in iterateElement(self) do
-            local sib_p = priv[sib]
-            if sib_p.layoutIndex then
-                y = y - (sib_p.tm + sib_p.h + sib_p.bm + parent_p.totalSpace)
-            end
-        end
-    elseif (self_p.alignY or self_p.inLayout and parent_p.alignChildren) == "top" then
-        self_p.anchorY = "top"
-        y = parent_p.t + parent_p.tp + self_p.offsetY - self_p.t + self_p.tm
-    elseif (self_p.alignY or self_p.inLayout and parent_p.alignChildren) == "middle" or (not self_p.inLayout and not self_p.alignY) then
-        self_p.anchorY = "middle"
-        y = parent_p.y + self_p.offsetY - self_p.y
-    elseif (self_p.alignY or self_p.inLayout and parent_p.alignChildren) == "bottom" then
-        self_p.anchorY = "bottom"
-        y = parent_p.b - parent_p.bp + self_p.offsetY - self_p.b - self_p.bm
-    elseif (self_p.alignY or self_p.inLayout and parent_p.alignChildren) == "expand" then
-        self_p.anchorY = "expand"
-        y = parent_p.y + self_p.offsetY + (self_p.tm - self_p.bm) / 2 - self_p.y
-        operation(dh, self, parent_p.h - parent_p.tp - parent_p.bp - self_p.h - self_p.tm - self_p.bm)
     end
     operation(dx, self, x)
     operation(dy, self, y)
 end
 
-local function addToLayout(self)
+function relayout(self)
     local self_p = priv[self]
-    local parent_p = priv[self_p.parentElement] or Element_p
-    if parent_p.justifyChildren == "left" then
-        operation(dx, self, ((parent_p.layoutCount > 0 or parent_p.spaceAround) and  parent_p.totalSpace/2 or 0) + self_p.lm + self_p.w/2)
-    elseif parent_p.justifyChildren == "center" then
-        operation(dx, self, self_p.lm/2 - self_p.rm/2)
-    elseif parent_p.justifyChildren == "right" then
-        operation(dx, self, ((parent_p.layoutCount > 0 or parent_p.spaceAround) and -parent_p.totalSpace/2 or 0) - self_p.rm - self_p.w/2)
-    elseif parent_p.justifyChildren == "top" then
-        operation(dy, self, ((parent_p.layoutCount > 0 or parent_p.spaceAround) and  parent_p.totalSpace/2 or 0) + self_p.tm + self_p.h/2)
-    elseif parent_p.justifyChildren == "middle" then
-        operation(dy, self, self_p.tm/2 - self_p.bm/2)
-    elseif parent_p.justifyChildren == "bottom" then
-        operation(dy, self, ((parent_p.layoutCount > 0 or parent_p.spaceAround) and -parent_p.totalSpace/2 or 0) - self_p.bm - self_p.h/2)
-    end
-    local index = 1
-    for sib in backtrackElement(self) do
-        local sib_p = priv[sib]
-        if sib_p.layoutIndex then index = index + 1 end
-        if sib_p.inLayout then
-            if parent_p.justifyChildren == "center" then
-                operation(dx, sib, (parent_p.layoutCount > 0 and -parent_p.totalSpace/2 or 0) - self_p.lm/2 - self_p.w/2 - self_p.rm/2)
-            elseif parent_p.justifyChildren == "right" then
-                operation(dx, sib, (parent_p.layoutCount > 0 and -parent_p.totalSpace   or 0) - self_p.lm   - self_p.w   - self_p.rm  )
-            elseif parent_p.justifyChildren == "middle" then
-                operation(dy, sib, (parent_p.layoutCount > 0 and -parent_p.totalSpace/2 or 0) - self_p.tm/2 - self_p.h/2 - self_p.bm/2)
-            elseif parent_p.justifyChildren == "bottom" then
-                operation(dy, sib, (parent_p.layoutCount > 0 and -parent_p.totalSpace   or 0) - self_p.tm   - self_p.h   - self_p.bm  )
-            end
+    local total = 0
+    for elem in iterateElementChildren(self) do
+        local elem_p = priv[elem]
+        if elem_p.layoutIndex then
+            total = total + mainExtent(self_p, elem_p) + self_p.totalSpace
         end
     end
-    self_p.layoutIndex = index
+    local before = 0
+    for elem in iterateElementChildren(self) do
+        local elem_p = priv[elem]
+        if elem_p.layoutIndex then
+            local extent = mainExtent(self_p, elem_p) + self_p.totalSpace
+            anchor(elem, before, total - before - extent)
+            before = before + extent
+        else
+            anchor(elem)
+        end
+    end
+end
+
+local function gapFor(parent_p)
+    return (parent_p.layoutCount > 0 or parent_p.spaceAround) and parent_p.space or 0
+end
+
+local function addToLayout(self)
+    local self_p = priv[self]
+    local parent = self_p.parentElement or Element
+    local parent_p = priv[parent]
+    local index = 1
+    for sib in backtrackElement(self) do
+        if priv[sib].layoutIndex then index = index + 1 end
+    end
     for sib in iterateElement(self) do
         local sib_p = priv[sib]
         if sib_p.layoutIndex then sib_p.layoutIndex = sib_p.layoutIndex + 1 end
-        if sib_p.inLayout then
-            if parent_p.justifyChildren == "left" then
-                operation(dx, sib, (parent_p.layoutCount > 0 and parent_p.totalSpace   or 0) + self_p.lm   + self_p.w   + self_p.rm  )
-            elseif parent_p.justifyChildren == "center" then
-                operation(dx, sib, (parent_p.layoutCount > 0 and parent_p.totalSpace/2 or 0) + self_p.lm/2 + self_p.w/2 + self_p.rm/2)
-            elseif parent_p.justifyChildren == "top" then
-                operation(dy, sib, (parent_p.layoutCount > 0 and parent_p.totalSpace   or 0) + self_p.tm   + self_p.h   + self_p.bm  )
-            elseif parent_p.justifyChildren == "middle" then
-                operation(dy, sib, (parent_p.layoutCount > 0 and parent_p.totalSpace/2 or 0) + self_p.tm/2 + self_p.h/2 + self_p.bm/2)
-            end
-        end
     end
-    local dr
-    if parent_p.layoutDirection == "row" then
-        dr = -self_p.lm - self_p.w - self_p.rm - (
-            (parent_p.layoutCount > 0 or parent_p.spaceAround)
-            and parent_p.space
-            or 0
-        )
-    elseif parent_p.layoutDirection == "column" then
-        dr = -self_p.tm - self_p.h - self_p.bm - (
-            (parent_p.layoutCount > 0 or parent_p.spaceAround)
-            and parent_p.space
-            or 0
-        )
-    end
+    local room = -mainExtent(parent_p, self_p) - gapFor(parent_p)
+    self_p.layoutIndex = index
     parent_p.layoutCount = parent_p.layoutCount + 1
-    local ns = parent_p.layoutCount + (parent_p.spaceAround and 1 or -1)
-    if ns > 0 then
-        operation(ds, self_p.parentElement or Element, math.max(parent_p.extraRoom, 0) / ns - (parent_p.totalSpace - parent_p.space), true)
-    end
-    operation(droom, self_p.parentElement or Element, dr)
+    operation(droom, parent, room)
+    operation(syncSpace, parent)
+    scheduleLayout(parent)
 end
 
 local function removeFromLayout(self)
     local self_p = priv[self]
-    self_p.layoutIndex = nil
-    local parent_p = priv[self_p.parentElement] or Element_p
-    parent_p.layoutCount = parent_p.layoutCount - 1
-    if parent_p.justifyChildren == "left" then
-        operation(dx, self, (parent_p.layoutCount > 0 and -parent_p.totalSpace/2 or 0) - self_p.lm - self_p.w/2)
-    elseif parent_p.justifyChildren == "center" then
-        operation(dx, self, self_p.rm/2 - self_p.lm/2)
-    elseif parent_p.justifyChildren == "right" then
-        operation(dx, self, (parent_p.layoutCount > 0 and  parent_p.totalSpace/2 or 0) + self_p.rm + self_p.w/2)
-    elseif parent_p.justifyChildren == "top" then
-        operation(dy, self, (parent_p.layoutCount > 0 and -parent_p.totalSpace/2 or 0) - self_p.tm - self_p.h/2)
-    elseif parent_p.justifyChildren == "middle" then
-        operation(dy, self, self_p.bm/2 - self_p.tm/2)
-    elseif parent_p.justifyChildren == "bottom" then
-        operation(dy, self, (parent_p.layoutCount > 0 and  parent_p.totalSpace/2 or 0) + self_p.bm + self_p.h/2)
-    end
-    for sib in backtrackElement(self) do
-        local sib_p = priv[sib]
-        if sib_p.inLayout then
-            if parent_p.justifyChildren == "center" then
-                operation(dx, sib, (parent_p.layoutCount > 0 and parent_p.totalSpace/2 or 0) + self_p.lm/2 + self_p.w/2 + self_p.rm/2)
-            elseif parent_p.justifyChildren == "right" then
-                operation(dx, sib, (parent_p.layoutCount > 0 and parent_p.totalSpace   or 0) + self_p.lm   + self_p.w   + self_p.rm  )
-            elseif parent_p.justifyChildren == "middle" then
-                operation(dy, sib, (parent_p.layoutCount > 0 and parent_p.totalSpace/2 or 0) + self_p.tm/2 + self_p.h/2 + self_p.bm/2)
-            elseif parent_p.justifyChildren == "bottom" then
-                operation(dy, sib, (parent_p.layoutCount > 0 and parent_p.totalSpace   or 0) + self_p.tm   + self_p.h   + self_p.bm  )
-            end
-        end
-    end
+    local parent = self_p.parentElement or Element
+    local parent_p = priv[parent]
     for sib in iterateElement(self) do
         local sib_p = priv[sib]
         if sib_p.layoutIndex then sib_p.layoutIndex = sib_p.layoutIndex - 1 end
-        if sib_p.inLayout then
-            if parent_p.justifyChildren == "left" then
-                operation(dx, sib, (parent_p.layoutCount > 0 and -parent_p.totalSpace   or 0) - self_p.lm   - self_p.w   - self_p.rm  )
-            elseif parent_p.justifyChildren == "center" then
-                operation(dx, sib, (parent_p.layoutCount > 0 and -parent_p.totalSpace/2 or 0) - self_p.lm/2 - self_p.w/2 - self_p.rm/2)
-            elseif parent_p.justifyChildren == "top" then
-                operation(dy, sib, (parent_p.layoutCount > 0 and -parent_p.totalSpace   or 0) - self_p.tm   - self_p.h   - self_p.bm  )
-            elseif parent_p.justifyChildren == "middle" then
-                operation(dy, sib, (parent_p.layoutCount > 0 and -parent_p.totalSpace/2 or 0) - self_p.tm/2 - self_p.h/2 - self_p.bm/2)
-            end
-        end
     end
-    local dr
-    if parent_p.layoutDirection == "row" then
-        dr = self_p.lm + self_p.w + self_p.rm + (
-            (parent_p.layoutCount > 0 or parent_p.spaceAround)
-            and parent_p.space
-            or 0
-        )
-    elseif parent_p.layoutDirection == "column" then
-        dr = self_p.tm + self_p.h + self_p.bm + (
-            (parent_p.layoutCount > 0 or parent_p.spaceAround)
-            and parent_p.space
-            or 0
-        )
-    end
-    local ns = parent_p.layoutCount + (parent_p.spaceAround and 1 or -1)
-    if ns > 0 then
-        operation(ds, self_p.parentElement or Element, math.max(parent_p.extraRoom, 0) / ns - (parent_p.totalSpace - parent_p.space), true)
-    end
-    operation(droom, self_p.parentElement or Element, dr)
+    self_p.layoutIndex = nil
+    parent_p.layoutCount = parent_p.layoutCount - 1
+    local room = mainExtent(parent_p, self_p) + gapFor(parent_p)
+    operation(droom, parent, room)
+    operation(syncSpace, parent)
+    scheduleLayout(parent)
 end
 
 Element:registerHandler("constructed", function(self)
@@ -931,13 +723,21 @@ local function added(self, parent)
             before[self][sib] = true
             if not sib_p.previousElement then
                 parent_p.firstChildElement, sib_p.previousElement, self_p.nextElement = self, self, sib
+                break
             elseif priv[sib_p.previousElement].sortingPriority >= self_p.sortingPriority then
                 priv[sib_p.previousElement].nextElement, self_p.previousElement = self, sib_p.previousElement
                 sib_p.previousElement, self_p.nextElement = self, sib
+                break
             end
         end
     end
     for sib in backtrackElement(self) do before[sib][self] = true end
+    if self_p.width then
+        operation(dw, self, (parent_p.w - parent_p.lp - parent_p.rp) * self_p.width - self_p.w)
+    end
+    if self_p.height then
+        operation(dh, self, (parent_p.h - parent_p.tp - parent_p.bp) * self_p.height - self_p.h)
+    end
     if self_p.inLayout and active[self] and firstActivated[self] then
         addToLayout(self)
     end
@@ -1799,27 +1599,9 @@ function setters:alignX(value)
     if value ~= nil and value ~= "left" and value ~= "center" and value ~= "right" and value ~= "stretch" then
         error(("Invalid value (%s), must be one of: left, center, right, stretch"):format(value), 2)
     end
-    local previous = self_p.anchorX
+    if self_p.alignX == value then return end
     self_p.alignX = value
-    local parent_p = priv[self_p.parentElement] or Element_p
-    value = value or (self_p.inLayout and parent_p.layoutDirection == "column" and parent_p.alignChildren) or "center"
-    if value == previous or self_p.inLayout and parent_p.layoutDirection == "row" then return end
-    self_p.anchorX = value
-    local d, room = 0, parent_p.w - parent_p.lp - parent_p.rp - self_p.w - self_p.lm - self_p.rm
-    if previous == "left" then
-        d = d + room/2
-    elseif previous == "right" then
-        d = d - room/2
-    end
-    if value == "left" then
-        d = d - room/2
-    elseif value == "right" then
-        d = d + room/2
-    elseif value == "stretch" then
-        d = d + self_p.lm/2 - self_p.rm/2
-    end
-    operation(dx, self, d)
-    if value == "stretch" then operation(dw, self, room) end
+    operation(anchor, self)
     flushOperations()
 end
 
@@ -1829,27 +1611,9 @@ function setters:alignY(value)
     if value ~= nil and value ~= "top" and value ~= "middle" and value ~= "bottom" and value ~= "expand" then
         error(("Invalid value (%s), must be one of: top, middle, bottom, expand"):format(value), 2)
     end
-    local previous = self_p.anchorY
+    if self_p.alignY == value then return end
     self_p.alignY = value
-    local parent_p = priv[self_p.parentElement] or Element_p
-    value = value or (self_p.inLayout and parent_p.layoutDirection == "row" and parent_p.alignChildren) or "middle"
-    if value == previous or self_p.inLayout and parent_p.layoutDirection == "column" then return end
-    self_p.anchorY = value
-    local d, room = 0, parent_p.h - parent_p.tp - parent_p.bp - self_p.h - self_p.tm - self_p.bm
-    if previous == "top" then
-        d = d + room/2
-    elseif previous == "bottom" then
-        d = d - room/2
-    end
-    if value == "top" then
-        d = d - room/2
-    elseif value == "bottom" then
-        d = d + room/2
-    elseif value == "expand" then
-        d = d + self_p.tm/2 - self_p.bm/2
-    end
-    operation(dy, self, d)
-    if value == "expand" then operation(dh, self, room) end
+    operation(anchor, self)
     flushOperations()
 end
 
@@ -1938,6 +1702,15 @@ function setters:inLayout(value)
     flushOperations()
 end
 
+local swapJustify = {
+    top = "left", middle = "center", bottom = "right",
+    left = "top", center = "middle", right = "bottom"
+}
+local swapAlign = {
+    left = "top", center = "middle", right = "bottom", stretch = "expand",
+    top = "left", middle = "center", bottom = "right", expand = "stretch"
+}
+
 function setters:layoutDirection(value)
     validateElement(self, "self", true)
     if value ~= "row" and value ~= "column" then
@@ -1946,63 +1719,18 @@ function setters:layoutDirection(value)
     local self_p = priv[self]
     if self_p.layoutDirection == value then return end
     self_p.layoutDirection = value
-    if value == "row" then
-        local room = self_p.w - self_p.lp - self_p.rp - (
-            self_p.layoutCount + (self_p.spaceAround and 1 or -1)
-        ) * self_p.space
-        if self_p.justifyChildren == "top" then
-            self_p.justifyChildren = "left"
-        elseif self_p.justifyChildren == "middle" then
-            self_p.justifyChildren = "center"
-        elseif self_p.justifyChildren == "bottom" then
-            self_p.justifyChildren = "right"
-        end
-        if self_p.alignChildren == "left" then
-            self_p.alignChildren = "top"
-        elseif self_p.alignChildren == "center" then
-            self_p.alignChildren = "middle"
-        elseif self_p.alignChildren == "right" then
-            self_p.alignChildren = "bottom"
-        end
-        for elem in iterateElementChildren(self) do
-            local elem_p = priv[elem]
-            if elem_p.inLayout then
-                if elem_p.layoutIndex then
-                    room = room - elem_p.w - elem_p.lm - elem_p.rm
-                end
-                operation(anchor, elem, true)
-            end
-        end
-        operation(droom, self, room - self_p.extraRoom)
-    elseif value == "column" then
-        local room = self_p.h - self_p.tp - self_p.bp - (
-            self_p.layoutCount + (self_p.spaceAround and 1 or -1)
-        ) * self_p.space
-        if self_p.justifyChildren == "left" then
-            self_p.justifyChildren = "top"
-        elseif self_p.justifyChildren == "center" then
-            self_p.justifyChildren = "middle"
-        elseif self_p.justifyChildren == "right" then
-            self_p.justifyChildren = "bottom"
-        end
-        if self_p.alignChildren == "top" then
-            self_p.alignChildren = "left"
-        elseif self_p.alignChildren == "middle" then
-            self_p.alignChildren = "center"
-        elseif self_p.alignChildren == "bottom" then
-            self_p.alignChildren = "right"
-        end
-        for elem in iterateElementChildren(self) do
-            local elem_p = priv[elem]
-            if elem_p.inLayout then
-                if elem_p.layoutIndex then
-                    room = room - elem_p.h - elem_p.tm - elem_p.bm
-                end
-                operation(anchor, elem, true)
-            end
-        end
-        operation(droom, self, room - self_p.extraRoom)
+    self_p.justifyChildren = swapJustify[self_p.justifyChildren] or self_p.justifyChildren
+    self_p.alignChildren   = swapAlign[self_p.alignChildren]     or self_p.alignChildren
+    local room = (value == "row" and self_p.w - self_p.lp - self_p.rp
+                                  or self_p.h - self_p.tp - self_p.bp)
+                 - gapCount(self_p) * self_p.space
+    for elem in iterateElementChildren(self) do
+        local elem_p = priv[elem]
+        if elem_p.layoutIndex then room = room - mainExtent(self_p, elem_p) end
     end
+    operation(droom, self, room - self_p.extraRoom)
+    syncScroll(self_p)
+    scheduleLayout(self)
     flushOperations()
 end
 
@@ -2015,43 +1743,10 @@ function setters:justifyChildren(value)
         error(("Invalid value (%s), must be one of: top, middle, bottom"):format(value), 2)
     end
     if self_p.justifyChildren == value then return end
-    local d = 0
-    if self_p.justifyChildren == "left" or self_p.justifyChildren == "top" then
-        d = d + self_p.extraRoom/2
-    elseif self_p.justifyChildren == "center" or self_p.justifyChildren == "middle" then
-        d = d
-    elseif self_p.justifyChildren == "right" or self_p.justifyChildren == "bottom" then
-        d = d - self_p.extraRoom/2
-    end
     self_p.justifyChildren = value
-    if value == "left" or value == "top" then
-        d = d - self_p.extraRoom/2
-        self_p.minScroll, self_p.maxScroll = math.min(self_p.extraRoom, 0), 0
-    elseif value == "center" or value == "middle" then
-        self_p.minScroll, self_p.maxScroll = math.min(self_p.extraRoom/2, 0), math.max(-self_p.extraRoom/2, 0)
-    elseif value == "right" or value == "bottom" then
-        d = d + self_p.extraRoom/2
-        self_p.minScroll, self_p.maxScroll = 0, math.max(-self_p.extraRoom, 0)
-    end
-    if self_p.scroll < self_p.minScroll then
-        d = d + self_p.minScroll - self_p.scroll
-        self_p.scroll = self_p.minScroll
-    elseif self_p.scroll > self_p.maxScroll then
-        d = d + self_p.maxScroll - self_p.scroll
-        self_p.scroll = self_p.maxScroll
-    end
-    for elem in iterateElementChildren(self) do
-        local elem_p = priv[elem]
-        if elem_p.inLayout then
-            if self_p.layoutDirection == "row" then
-                elem_p.anchorX = value
-                operation(dx, elem, d)
-            elseif self_p.layoutDirection == "column" then
-                elem_p.anchorY = value
-                operation(dy, elem, d)
-            end
-        end
-    end
+    syncScroll(self_p)
+    scheduleLayout(self)
+    flushOperations()
 end
 
 function setters:alignChildren(value)
@@ -2063,48 +1758,9 @@ function setters:alignChildren(value)
         error(("Invalid value (%s), must be one of: left, center, right, stretch"):format(value), 2)
     end
     if self_p.alignChildren == value then return end
-    local previous = self_p.alignChildren
     self_p.alignChildren = value
-    for elem in iterateElementChildren(self) do
-        local elem_p = priv[elem]
-        if elem_p.inLayout then
-            if self_p.layoutDirection == "row" and not elem_p.alignY then
-                elem_p.anchorY = value
-                local d, room = 0, self_p.h - self_p.tp - self_p.bp - elem_p.h - elem_p.tm - elem_p.bm
-                if previous == "top" then
-                    d = d + room/2
-                elseif previous == "bottom" then
-                    d = d - room/2
-                end
-                if value == "top" then
-                    d = d - room/2
-                elseif value == "bottom" then
-                    d = d + room/2
-                elseif value == "expand" then
-                    d = d + elem_p.tm/2 - elem_p.bm/2
-                end
-                operation(dy, elem, d)
-                if value == "expand" then operation(dh, elem, room) end
-            elseif self_p.layoutDirection == "column" and not elem_p.alignX then
-                elem_p.anchorX = value
-                local d, room = 0, self_p.w - self_p.lp - self_p.rp - elem_p.w - elem_p.lm - elem_p.rm
-                if previous == "left" then
-                    d = d + room/2
-                elseif previous == "right" then
-                    d = d - room/2
-                end
-                if value == "left" then
-                    d = d - room/2
-                elseif value == "right" then
-                    d = d + room/2
-                elseif value == "stretch" then
-                    d = d + elem_p.lm/2 - elem_p.rm/2
-                end
-                operation(dx, elem, d)
-                if value == "stretch" then operation(dw, elem, room) end
-            end
-        end
-    end
+    scheduleLayout(self)
+    flushOperations()
 end
 
 function setters:spaceAround(value)
@@ -2114,32 +1770,11 @@ function setters:spaceAround(value)
     end
     local self_p = priv[self]
     if self_p.spaceAround == value then return end
+    local before = gapCount(self_p)
     self_p.spaceAround = value
-    if self_p.layoutCount > 0 then
-        local sign = value and 1 or -1
-        local d = 0
-        if self_p.justifyChildren == "left" or self_p.justifyChildren == "top" then
-            d =  sign * self_p.totalSpace
-        elseif self_p.justifyChildren == "right" or self_p.justifyChildren == "bottom" then
-            d = -sign * self_p.totalSpace
-        end
-        for elem in iterateElementChildren(self) do
-            if priv[elem].inLayout then
-                if self_p.layoutDirection == "row" then
-                    operation(dx, elem, d)
-                elseif self_p.layoutDirection == "column" then
-                    operation(dy, elem, d)
-                end
-            end
-        end
-        local ns = parent_p.layoutCount + (value and 1 or -1)
-        if ns > 0 then
-            operation(ds, self, math.max(self_p.extraRoom, 0) / ns - (self_p.totalSpace - self_p.space), true)
-        end
-        operation(droom, self, 2 * -sign * self_p.space)
-    else
-        operation(droom, self, (value and -1 or 1) * self_p.space)
-    end
+    operation(droom, self, (before - gapCount(self_p)) * self_p.space)
+    operation(syncSpace, self)
+    scheduleLayout(self)
     flushOperations()
 end
 
@@ -2151,18 +1786,8 @@ function setters:expandSpace(value)
     local self_p = priv[self]
     if self_p.expandSpace == value then return end
     self_p.expandSpace = value
-    local ns = math.max(self_p.layoutCount + (self_p.spaceAround and 1 or -1), 0)
-    if ns > 0 then
-        if value then
-            local d = math.max(self_p.extraRoom, 0) / ns
-            if d > 0 then operation(ds, self, d, true) end
-        else
-            local d = self_p.space - self_p.totalSpace
-            if d < 0 then operation(ds, self, d, true) end
-        end
-    else
-        self_p.totalSpace = self_p.totalSpace + (value and 1 or -1) * self_p.extraRoom
-    end
+    operation(syncSpace, self)
+    scheduleLayout(self)
     flushOperations()
 end
 
@@ -2173,18 +1798,9 @@ function setters:scroll(value)
     end
     local self_p = priv[self]
     value = math.max(self_p.minScroll, math.min(self_p.maxScroll, value))
-    local d = value - self_p.scroll
+    if self_p.scroll == value then return end
     self_p.scroll = value
-    for elem in iterateElementChildren(self) do
-        local elem_p = priv[elem]
-        if elem_p.inLayout then
-            if self_p.layoutDirection == "row" then
-                operation(dx, elem, d)
-            elseif self_p.layoutDirection == "column" then
-                operation(dy, elem, d)
-            end
-        end
-    end
+    scheduleLayout(self)
     flushOperations()
 end
 
@@ -2277,6 +1893,7 @@ function setSortOrder(self, priority)
         end
     end
     operation(move, self, moveself)
+    scheduleLayout(self_p.parentElement or Element)
     flushOperations()
     if initialized[self] then
         floof.safeInvoke(Object.invokeHandlers, self, "reordered")
@@ -2363,6 +1980,7 @@ function moveBefore(self, nxt)
         end
     end
     operation(move, self, moveself)
+    scheduleLayout(self_p.parentElement or Element)
     flushOperations()
     if initialized[self] then
         floof.safeInvoke(Object.invokeHandlers, self, "reordered")
@@ -2449,6 +2067,7 @@ function moveAfter(self, prv)
         end
     end
     operation(move, self, moveself)
+    scheduleLayout(self_p.parentElement or Element)
     flushOperations()
     if initialized[self] then
         floof.safeInvoke(Object.invokeHandlers, self, "reordered")
