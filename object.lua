@@ -39,7 +39,7 @@ local setDepth,
       backwardInHierarchy, backwardInHierarchy,
       hierarchyForwards, hierarchyBackwards
     
-local getPointerPos,
+local getPointerPos, spreadPointer, inheritPointer,
       stopHover,
       checkHover, cancelHover,
       shapeChanged
@@ -277,6 +277,7 @@ function Object:__init(data, ...)
     if self_p.isActive then
         invokeHandlers(self, "activated")
         handleCallback(self, "activated")
+        inheritPointer(self, self_p, priv[self_p.parent] or Object_p)
         if floof.safeInvoke(checkHover, self) then
             local parent_p = priv[self_p.parent] or Object_p
             local old = parent_p.hoverTarget
@@ -468,7 +469,7 @@ function Object.initialize(arg)
         function love.mouse.setRelativeMode(value)
             floof.safeInvoke(setters.ownPointer, Object, value)
         end
-        Object_p.pointerX, Object_p.pointerY = love.mouse.getPosition()
+        floof.safeInvoke(spreadPointer, Object, love.mouse.getPosition())
         if Object_p.ownPointer then setRelativeMode(true)
         elseif love.mouse.getRelativeMode() then Object_p.ownPointer = true end
     end
@@ -558,6 +559,7 @@ function add(self, parent)
             if sib_p.isHovered then self_p.behindHover = true end
         end
     end
+    inheritPointer(self, self_p, parent_p)
     if floof.safeInvoke(checkHover, self) then
         local old = parent_p.hoverTarget
         parent_p.hoverTarget = self
@@ -679,6 +681,7 @@ function setActiveState(self, state)
     end
     floof.safeInvoke(activeState, self, state)
     if state then
+        inheritPointer(self, self_p, parent_p)
         if floof.safeInvoke(checkHover, self) then
             local old = parent_p.hoverTarget
             parent_p.hoverTarget = self
@@ -980,6 +983,27 @@ hierarchyBackwards = floof.newIterator(backwardInHierarchy)
 Object.hierarchyBackwards, Object.backwardInHierarchy = hierarchyBackwards, backwardInHierarchy
 
 -- pointers
+
+function spreadPointer(self, x, y)
+    local curr, q, tail = self, {}, self
+    while curr do
+        local curr_p = priv[curr]
+        curr_p.pointerX, curr_p.pointerY = x, y
+        for ch in frontToBack(curr) do
+            local ch_p = priv[ch]
+            if ch_p.isActive and not ch_p.ownPointer then
+                q[tail], tail = ch, ch
+            end
+        end
+        curr = q[curr]
+    end
+end
+Object.spreadPointer = spreadPointer
+
+function inheritPointer(self, self_p, parent_p)
+    if self_p.ownPointer then return end
+    floof.safeInvoke(spreadPointer, self, parent_p.pointerX, parent_p.pointerY)
+end
 
 function getPointerPos(self)
     validateObject(self, "caller", true)
@@ -1303,9 +1327,9 @@ function movePointer(self, x, y, dx, dy, ...)
         end
     end
     local px, py = self_p.pointerX, self_p.pointerY
+    spreadPointer(self, x, y)
     local curr, curr_p = self, self_p
     repeat
-        curr_p.pointerX, curr_p.pointerY = x, y
         local hov, old, new = curr_p.hoverTarget
         for ch in frontToBack(curr) do
             local ch_p = priv[ch]
@@ -1440,6 +1464,11 @@ function setters:ownPointer(value)
             self_p.pressTargets[press] = nil
             floof.safeInvoke(stopPress, obj, press, self_p.pointerX, self_p.pointerY, false)
         end
+    end
+    if value then
+        floof.safeInvoke(spreadPointer, self, self_p.pointerX, self_p.pointerY)
+    else
+        inheritPointer(self, self_p, priv[self_p.parent] or Object_p)
     end
 end
 
