@@ -559,27 +559,24 @@ function add(self, parent)
             if sib_p.isHovered then self_p.behindHover = true end
         end
     end
+    self_p.parent = parent
+    self_p.hierarchyLevel = parent and parent_p.hierarchyLevel + 1 or 0
     inheritPointer(self, self_p, parent_p)
     if floof.safeInvoke(checkHover, self) then
         local old = parent_p.hoverTarget
         parent_p.hoverTarget = self
         if old then floof.safeInvoke(stopHover, old) end
     end
-    self_p.parent = parent
     if parent then
-        self_p.hierarchyLevel = parent_p.hierarchyLevel + 1
         if self_p.isInitialized then
             invokeHandlers(self, "addedto", parent)
             handleCallback(self, "addedto", parent)
             invokeHandlers(parent, "added", self)
             handleCallback(parent, "added", self)
         end
-    else
-        self_p.hierarchyLevel = 0
-        if self_p.isInitialized then
-            invokeHandlers(self, "orphaned")
-            handleCallback(self, "orphaned")
-        end
+    elseif self_p.isInitialized then
+        invokeHandlers(self, "orphaned")
+        handleCallback(self, "orphaned")
     end
 end
 Object.setParent, setters.parent = add, add
